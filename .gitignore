@@ -1,0 +1,57 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Python cache / artifacts ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+
+# --- Test / coverage outputs ---
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Local env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Local databases / dumps ---
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+
+# --- Logs / runtime files ---
+*.log
+*.pid
+*.out
+*.err
+
+# --- Alembic / Python internals ---
+alembic/__pycache__/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
