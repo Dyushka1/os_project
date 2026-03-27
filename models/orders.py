@@ -90,4 +90,8 @@ class Order(Base):
     time_print_finished = Column(DateTime, nullable=True)
     time_issued = Column(DateTime, nullable=True)
     
+    promo_code = Column(String, nullable=True, index=True)
+    notify_method = Column(String, nullable=True)
+    notify_contact = Column(String, nullable=True)
+    
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)

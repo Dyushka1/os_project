@@ -267,3 +267,48 @@ def test_update_order_catalog_rejects_inactive_model(api_fixture):
 
     assert update_response.status_code == 400
     assert "inactive" in update_response.json()["detail"].lower()
+
+
+def test_create_order_saves_promo_and_notify_fields(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Promo User", "phone": "+74444444444"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+            "print_id": ids["print_1_id"],
+            "promo_code": "SPRING10",
+            "notify_method": "telegram",
+            "notify_contact": "@promo_user",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["promo_code"] == "SPRING10"
+    assert body["notify_method"] == "telegram"
+    assert body["notify_contact"] == "@promo_user"
+
+
+def test_search_orders_finds_by_promo_code(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Search Promo", "phone": "+75555555555"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+            "promo_code": "PROMO-777",
+        },
+    )
+    assert create_response.status_code == 200
+    created_order_id = create_response.json()["id"]
+
+    search_response = client.get("/orders/search", params={"q": "PROMO-777"})
+    assert search_response.status_code == 200
+
+    rows = search_response.json()
+    assert any(row["id"] == created_order_id for row in rows)

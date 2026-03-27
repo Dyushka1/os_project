@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from auth import get_current_user, require_active_session, require_roles
 from models.users import User, Role
@@ -69,7 +70,37 @@ def resolve_client_id(db: Session, client_id: int | None, client_data: ClientCre
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Either client_id or client data must be provided",
     )
+@router.get("/search", response_model=list[OrderRead])
+def search_orders(
+    q: str | None = Query(default=None),
+    order_status: OrderStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.RECEPTION, Role.ISSUE])
 
+    query = db.query(Order).outerjoin(Client, Client.id == Order.client_id)
+
+    if q:
+        q_value = q.strip()
+        if q_value:
+            filters = []
+            if q_value.isdigit():
+                filters.append(Order.id == int(q_value))
+
+            like_value = f"%{q_value}%"
+            filters.append(Client.name.ilike(like_value))
+            filters.append(Client.phone.ilike(like_value))
+            filters.append(Order.promo_code.ilike(like_value))
+
+            query = query.filter(or_(*filters))
+
+    if order_status is not None:
+        query = query.filter(Order.status == order_status.value)
+
+    return query.order_by(Order.id.desc()).limit(limit).all()
+        
 
 
 @router.get("/", response_model=list[OrderRead])
@@ -188,7 +219,10 @@ def create_order(order: OrderCreate,
                       color_id=resolved_color_id,
                       model_id=order.model_id,
                       size_id=order.size_id,
-                      print_id=order.print_id,)
+                      print_id=order.print_id,
+                      promo_code=order.promo_code,
+                      notify_method=order.notify_method,
+                      notify_contact=order.notify_contact,)
     model_and_size.stock_qty -= 1
     db.add(new_order)
     db.flush()
