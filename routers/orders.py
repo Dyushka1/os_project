@@ -3,11 +3,11 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from auth import get_current_user, require_active_session, require_roles
 from models.users import User, Role
-from schemas.orders import OrderCreate, OrderRead, OrderUpdate, OrderCatalogUpdate
+from schemas.orders import OrderCreate, OrderRead, OrderUpdate, OrderCatalogUpdate, OrderCancelRequest
 from schemas.clients import ClientCreate
 from database import get_db
 from models.clients import Client
-from models.orders import Order, OrderStatus, validate_status_transition
+from models.orders import Order, OrderStatus, validate_status_transition, validate_cancel_request, validate_cancel_approve
 from models.catalog_model_sizes import CatalogModelSize
 from models.catalog_models import CatalogModel
 from models.catalog_sizes import CatalogSize
@@ -37,6 +37,22 @@ def log_order_event(db: Session, order_id: int, event_type: str, user_id: int | 
                        user_id = user_id,
                        created_at = datetime.now(timezone.utc))
     db.add(event)
+
+
+def get_order_or_404(db: Session, order_id: int) -> Order:
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+    return order
+
+
+def clear_cancel_request_fields(order: Order) -> None:
+    order.cancel_requested_from_status = None
+    order.cancel_requested_at = None
+    order.cancel_requested_by_user_id = None
 
 
 def validate_print_payload(
@@ -847,36 +863,30 @@ def get_next_nanesenie_order(
 
 @router.post("/{order_id}/cancel_request", response_model=OrderRead)
 def request_cancel_order(order_id: int,
+                         data: OrderCancelRequest,
                          db: Session = Depends(get_db),
-                        current_user: User = Depends(get_current_user),
-                        session = Depends(require_active_session)):
+                         current_user: User = Depends(get_current_user),
+                         session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
-        
-    if order.status in [OrderStatus.ISSUED.value, OrderStatus.CANCELED.value, OrderStatus.CANCEL_REQUESTED.value]:
+    order = get_order_or_404(db, order_id)
+
+    validate_cancel_request(order.status)
+
+    if not data.reason or not data.reason.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot request cancel for order in status {order.status}",
+            detail="Cancel reason is required",
         )
 
-    if order.status in [OrderStatus.NEW.value, OrderStatus.CONFIRMED.value, OrderStatus.PRINTING.value, OrderStatus.PRINTED.value, OrderStatus.NANESENIE.value, OrderStatus.NANESENIE_DONE.value, OrderStatus.DELIVERING.value]:
-        order.cancel_requested_from_status = order.status
-        order.status = OrderStatus.CANCEL_REQUESTED.value
-        log_order_event(db, order.id, "cancel_requested", user_id=current_user.id)
-        order.cancel_requested_by_user_id = current_user.id
-        order.cancel_requested_at = datetime.now(timezone.utc)
-        commit_with_rollback(db)
-        db.refresh(order)
-        return order
-    raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot request cancel for order in status {order.status}",
-        )
+    order.cancel_requested_from_status = order.status
+    order.status = OrderStatus.CANCEL_REQUESTED.value
+    order.cancel_reason = data.reason.strip()
+    order.cancel_requested_by_user_id = current_user.id
+    order.cancel_requested_at = datetime.now(timezone.utc)
+    log_order_event(db, order.id, "cancel_requested", user_id=current_user.id)
+    commit_with_rollback(db)
+    db.refresh(order)
+    return order
 
 @router.post("/{order_id}/cancel_approve", response_model=OrderRead)
 def approve_cancel_order(order_id: int,
@@ -884,25 +894,32 @@ def approve_cancel_order(order_id: int,
                          current_user: User = Depends(get_current_user),
                          session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
+    order = get_order_or_404(db, order_id)
+    validate_cancel_approve(order.status)
+
+    from_status = order.cancel_requested_from_status
+    if from_status in {OrderStatus.NEW.value, OrderStatus.CONFIRMED.value}:
+        current_model_size = (
+            db.query(CatalogModelSize)
+            .filter(
+                CatalogModelSize.model_id == order.model_id,
+                CatalogModelSize.size_id == order.size_id,
+            )
+            .first()
         )
-    if order.status != OrderStatus.CANCEL_REQUESTED.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot approve cancel for order in status {order.status}",
-        )
+        if not current_model_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current order model-size combination is invalid",
+            )
+        current_model_size.stock_qty += 1
     order.status = OrderStatus.CANCELED.value
     log_order_event(db, order.id, "cancel_approved", user_id=current_user.id)
     order.canceled_by_user_id = current_user.id
-    order.cancel_reason = f"Cancel approved by {current_user.username} (id: {current_user.id})"
+    if not order.cancel_reason:
+        order.cancel_reason = f"Cancel approved by {current_user.username} (id: {current_user.id})"
     order.canceled_at = datetime.now(timezone.utc)
-    order.cancel_requested_from_status = None
-    order.cancel_requested_at = None
-    order.cancel_requested_by_user_id = None
+    clear_cancel_request_fields(order)
     commit_with_rollback(db)
     db.refresh(order)
     return order    
@@ -913,16 +930,11 @@ def reject_cancel_order(order_id: int,
                         current_user: User = Depends(get_current_user),
                         session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
+    order = get_order_or_404(db, order_id)
     if order.status != OrderStatus.CANCEL_REQUESTED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot reject cancel for order in status {order.status}",
+            detail="Cancel can only be rejected from cancel_requested status",
         )
     if not order.cancel_requested_from_status:
         raise HTTPException(
@@ -932,9 +944,7 @@ def reject_cancel_order(order_id: int,
 
     order.status = order.cancel_requested_from_status
     log_order_event(db, order.id, "cancel_rejected", user_id=current_user.id)
-    order.cancel_requested_from_status = None
-    order.cancel_requested_at = None
-    order.cancel_requested_by_user_id = None
+    clear_cancel_request_fields(order)
     order.cancel_reason = None
     commit_with_rollback(db)
     db.refresh(order)
@@ -952,4 +962,3 @@ def delete_order(order_id: int, db: Session = Depends(get_db), current_user: Use
     db.delete(order)
     commit_with_rollback(db)
     return {"detail": f"Order {order_id} deleted"}
-
