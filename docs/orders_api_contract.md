@@ -213,7 +213,142 @@
 
 ---
 
-## 4) Быстрые примеры curl
+## 4) Обновление статуса заказа (Lifecycle)
+
+**Endpoint:** `PUT /orders/{order_id}`
+
+### Права
+- `ADMIN`, `RECEPTION`
+
+### Request body
+```json
+{
+  "status": "confirmed"
+}
+```
+
+### Валидации
+- Заказ должен существовать
+- Переход статуса должен быть разрешён по бизнес-правилам `STATUS_TRANSITIONS`
+
+### Побочные эффекты
+- При переходе в `confirmed` выставляется `time_confirmed`
+- Пишется событие `order_confirmed`
+
+### Временные метки lifecycle
+- `POST /orders/{id}/take_print` и `POST /orders/next/print` -> `time_print_started`
+- `POST /orders/{id}/finish_print` -> `time_print_finished`
+- `POST /orders/{id}/issue` -> `time_issued`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`: `Cannot change status from ... to ...`
+
+---
+
+## 5) Отмена заказа (Cancel Flow)
+
+### 5.1) Запрос отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_request`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Request body
+```json
+{
+  "reason": "Client changed mind"
+}
+```
+
+### Валидации
+- Заказ должен существовать
+- Отмена разрешена только из: `new`, `confirmed`, `printing`, `printed`, `nanesenie`, `nanesenie_done`, `delivering`
+- `reason` обязателен и не должен быть пустым
+
+### Побочные эффекты
+- `status -> cancel_requested`
+- Заполняются поля:
+  - `cancel_reason`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+  - `cancel_requested_from_status`
+- Пишется событие `cancel_requested`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`:
+  - `Cannot request cancel from status ...`
+  - `Cancel reason is required`
+
+---
+
+### 5.2) Подтверждение отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_approve`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Валидации
+- Заказ должен существовать
+- Допустимо только из `cancel_requested`
+
+### Побочные эффекты
+- `status -> canceled`
+- Если запрос отмены был из `new` или `confirmed`:
+  - найденной связке `model+size` возвращается склад (`stock_qty += 1`)
+- Заполняются:
+  - `canceled_by_user_id`
+  - `canceled_at`
+- Очищаются поля запроса отмены:
+  - `cancel_requested_from_status`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+- Пишется событие `cancel_approved`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`:
+  - `Cancel can only be approved from cancel_requested status`
+  - `Current order model-size combination is invalid`
+
+---
+
+### 5.3) Отклонение отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_reject`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Валидации
+- Заказ должен существовать
+- Допустимо только из `cancel_requested`
+- Должен быть сохранён `cancel_requested_from_status`
+
+### Побочные эффекты
+- `status` возвращается в `cancel_requested_from_status`
+- Очищаются поля запроса отмены:
+  - `cancel_requested_from_status`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+  - `cancel_reason`
+- Пишется событие `cancel_rejected`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`:
+  - `Cancel can only be rejected from cancel_requested status`
+  - `Original status is missing for cancel reject`
+
+---
+
+## 6) Быстрые примеры curl
 
 > Подставить `<TOKEN>` и реальные id.
 
