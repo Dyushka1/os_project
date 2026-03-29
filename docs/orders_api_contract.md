@@ -22,7 +22,16 @@
   "color_id": 1,
   "model_id": 10,
   "size_id": 3,
-  "print_id": 5
+  "print_id": 5,
+  "promo_code": "SPRING10",
+  "notify_method": "telegram",
+  "notify_contact": "@ivanov",
+  "print_text": "TEAM",
+  "print_font": "Arial",
+  "print_side": "front",
+  "print_x": 120,
+  "print_y": 80,
+  "print_angle": 0
 }
 ```
 
@@ -33,6 +42,14 @@
 - `model_id` *(required)*
 - `size_id` *(required)*
 - `print_id` *(optional)*
+- `promo_code` *(optional)*
+- `notify_method` *(optional)*
+- `notify_contact` *(optional)*
+- `print_text` *(optional)*
+- `print_font` *(optional)*
+- `print_side` *(optional)* — одно из: `front`, `back`, `left`, `right`
+- `print_x`, `print_y` *(optional, int)* — координаты нанесения
+- `print_angle` *(optional, float)* — угол поворота от `-180` до `180`
 
 ### Валидации
 - Нельзя передавать одновременно `client_id` и `client`
@@ -44,6 +61,12 @@
 - `catalog_model_sizes.is_active` должен быть `true`
 - `catalog_model_sizes.stock_qty > 0`
 - Если передан `print_id`: print должен существовать и быть `is_active=true`
+- `print_x` и `print_y` передаются только парой
+- `print_x >= 0`, `print_y >= 0`
+- `print_angle` в диапазоне `[-180, 180]`
+- `print_side` только из: `front`, `back`, `left`, `right`
+- `print_text` и `print_font` передаются только парой
+- Если `print.print_type` из текстовых (`text`, `custom_text`, `own_text`, `own-text`) — обязателен `print_text`
 - Цвет должен совпадать с выбранной моделью
 - Цвет должен существовать и быть `is_active=true`
 
@@ -69,6 +92,13 @@
   - `Selected model and size combination is out of stock`
   - `Print with id ... not found`
   - `Selected print is inactive`
+  - `print_x and print_y must be provided together`
+  - `print_x must be >= 0`
+  - `print_y must be >= 0`
+  - `print_angle must be between -180 and 180`
+  - `print_side must be one of: front, back, left, right`
+  - `print_text and print_font must be provided together`
+  - `Text print requires print_text`
   - `Provided color_id does not match selected model`
   - `Color with id ... not found`
   - `Selected color is inactive`
@@ -92,7 +122,13 @@
   "color_id": 2,
   "model_id": 11,
   "size_id": 4,
-  "print_id": 7
+  "print_id": 7,
+  "print_text": "TEAM",
+  "print_font": "Arial",
+  "print_side": "back",
+  "print_x": 100,
+  "print_y": 60,
+  "print_angle": 15
 }
 ```
 
@@ -106,6 +142,12 @@
 - Цвет должен соответствовать выбранной модели
 - Цвет должен существовать и быть активным
 - Если передан `print_id`, print должен существовать и быть активным
+- `print_x` и `print_y` должны быть переданы парой
+- `print_x >= 0`, `print_y >= 0`
+- `print_angle` в диапазоне `[-180, 180]`
+- `print_side` только из: `front`, `back`, `left`, `right`
+- `print_text` и `print_font` должны быть переданы парой
+- Для текстового типа print обязателен `print_text`
 
 ### Побочные эффекты (атомарно)
 - Если пара `model+size` изменилась:
@@ -132,6 +174,13 @@
   - `Selected color is inactive`
   - `Print with id ... not found`
   - `Selected print is inactive`
+  - `print_x and print_y must be provided together`
+  - `print_x must be >= 0`
+  - `print_y must be >= 0`
+  - `print_angle must be between -180 and 180`
+  - `print_side must be one of: front, back, left, right`
+  - `print_text and print_font must be provided together`
+  - `Text print requires print_text`
 
 ---
 

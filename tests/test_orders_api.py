@@ -56,8 +56,9 @@ def api_fixture(tmp_path):
     seed_db.add_all([size_1, size_2])
 
     print_1 = CatalogPrint(name="Logo", print_type="regular", stock_qty=100, is_active=True)
+    print_textual = CatalogPrint(name="TextLogo", print_type="text", stock_qty=100, is_active=True)
     print_inactive = CatalogPrint(name="OldLogo", print_type="regular", stock_qty=100, is_active=False)
-    seed_db.add_all([print_1, print_inactive])
+    seed_db.add_all([print_1, print_textual, print_inactive])
     seed_db.flush()
 
     pair_1 = CatalogModelSize(model_id=model_1.id, size_id=size_1.id, stock_qty=5, is_active=True)
@@ -73,6 +74,7 @@ def api_fixture(tmp_path):
     seed_db.refresh(size_1)
     seed_db.refresh(size_2)
     seed_db.refresh(print_1)
+    seed_db.refresh(print_textual)
 
     admin_id = admin.id
     session_id = active_session.id
@@ -103,6 +105,7 @@ def api_fixture(tmp_path):
         "size_1_id": size_1.id,
         "size_2_id": size_2.id,
         "print_1_id": print_1.id,
+        "print_text_id": print_textual.id,
     }
 
     seed_db.close()
@@ -312,3 +315,101 @@ def test_search_orders_finds_by_promo_code(api_fixture):
 
     rows = search_response.json()
     assert any(row["id"] == created_order_id for row in rows)
+
+
+@pytest.mark.parametrize(
+    "payload,expected_detail",
+    [
+        (
+            {
+                "print_id": "print_1_id",
+                "print_x": 10,
+            },
+            "print_x and print_y must be provided together",
+        ),
+        (
+            {
+                "print_id": "print_1_id",
+                "print_angle": 181,
+            },
+            "print_angle must be between -180 and 180",
+        ),
+        (
+            {
+                "print_id": "print_1_id",
+                "print_side": "sleeve",
+            },
+            "print_side must be one of: front, back, left, right",
+        ),
+        (
+            {
+                "print_id": "print_1_id",
+                "print_text": "TEAM",
+            },
+            "print_text and print_font must be provided together",
+        ),
+    ],
+)
+def test_create_order_rejects_invalid_print_payload(api_fixture, payload, expected_detail):
+    client, _session_local, ids = api_fixture
+
+    request_body = {
+        "client": {"name": "Print Validation", "phone": "+76666666666"},
+        "model_id": ids["model_1_id"],
+        "size_id": ids["size_1_id"],
+    }
+
+    resolved_payload = {}
+    for key, value in payload.items():
+        if isinstance(value, str) and value in ids:
+            resolved_payload[key] = ids[value]
+        else:
+            resolved_payload[key] = value
+
+    request_body.update(resolved_payload)
+
+    response = client.post("/orders/", json=request_body)
+
+    assert response.status_code == 400
+    assert expected_detail in response.json()["detail"]
+
+
+def test_create_order_rejects_text_print_without_text(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Text Print", "phone": "+77777777777"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+            "print_id": ids["print_text_id"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Text print requires print_text" in response.json()["detail"]
+
+
+def test_update_order_catalog_rejects_invalid_print_payload(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Update Print", "phone": "+78888888888"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+            "print_id": ids["print_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    update_response = client.put(
+        f"/orders/{order_id}/catalog",
+        json={"print_x": -1, "print_y": 10},
+    )
+
+    assert update_response.status_code == 400
+    assert "print_x must be >= 0" in update_response.json()["detail"]

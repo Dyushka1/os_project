@@ -52,6 +52,7 @@ def create_model(payload: CatalogModelCreate, db: Session = Depends(get_db), cur
 
     item = CatalogModel(
         name=payload.name,
+        garment_type=payload.garment_type.value if payload.garment_type is not None else None,
         color_id=payload.color_id,
         front_image_url=payload.front_image_url,
         back_image_url=payload.back_image_url,
@@ -76,6 +77,9 @@ def update_model(model_id: int, payload: CatalogModelUpdate, db: Session = Depen
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Model name already exists")
         item.name = payload.name
+
+    if payload.garment_type is not None:
+        item.garment_type = payload.garment_type.value
 
     if payload.color_id is not None:
         color = db.query(CatalogColors).filter(CatalogColors.id == payload.color_id).first()

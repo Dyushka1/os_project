@@ -17,6 +17,9 @@ from datetime import datetime, timezone
 from models.order_events import OrderEvent
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+TEXT_PRINT_TYPES = {"text", "custom_text", "own_text", "own-text"}
+ALLOWED_PRINT_SIDES = {"front", "back", "left", "right"}
+
 
 def commit_with_rollback(db: Session) -> None:
     try:
@@ -34,6 +37,52 @@ def log_order_event(db: Session, order_id: int, event_type: str, user_id: int | 
                        user_id = user_id,
                        created_at = datetime.now(timezone.utc))
     db.add(event)
+
+
+def validate_print_payload(
+    print_type: str | None,
+    print_text: str | None,
+    print_font: str | None,
+    print_side: str | None,
+    print_x: int | None,
+    print_y: int | None,
+    print_angle: float | None,
+) -> None:
+    if (print_x is None) != (print_y is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_x and print_y must be provided together",
+        )
+    if print_x is not None and print_x < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_x must be >= 0",
+        )
+    if print_y is not None and print_y < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_y must be >= 0",
+        )
+    if print_angle is not None and (print_angle < -180 or print_angle > 180):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_angle must be between -180 and 180",
+        )
+    if print_side is not None and print_side not in ALLOWED_PRINT_SIDES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_side must be one of: front, back, left, right",
+        )
+    if bool(print_text) != bool(print_font):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_text and print_font must be provided together",
+        )
+    if print_type in TEXT_PRINT_TYPES and not print_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text print requires print_text",
+        )
     
     
 def get_or_create_client(db: Session, client_data: ClientCreate) -> int:
@@ -194,6 +243,17 @@ def create_order(order: OrderCreate,
                 detail="Selected print is inactive",
             )
 
+    selected_print_type = catalog_print.print_type if order.print_id is not None else None
+    validate_print_payload(
+        print_type=selected_print_type,
+        print_text=order.print_text,
+        print_font=order.print_font,
+        print_side=order.print_side,
+        print_x=order.print_x,
+        print_y=order.print_y,
+        print_angle=order.print_angle,
+    )
+
     resolved_color_id = order.color_id if order.color_id is not None else model.color_id
     if resolved_color_id != model.color_id:
         raise HTTPException(
@@ -222,7 +282,13 @@ def create_order(order: OrderCreate,
                       print_id=order.print_id,
                       promo_code=order.promo_code,
                       notify_method=order.notify_method,
-                      notify_contact=order.notify_contact,)
+                      notify_contact=order.notify_contact,
+                      print_text=order.print_text,
+                      print_font=order.print_font,
+                      print_side=order.print_side,
+                      print_x=order.print_x,
+                      print_y=order.print_y,
+                      print_angle=order.print_angle,)
     model_and_size.stock_qty -= 1
     db.add(new_order)
     db.flush()
@@ -338,18 +404,37 @@ def update_order_catalog(order_id: int,
             detail="Selected color is inactive",
         )
 
-    if data.print_id is not None:
-        catalog_print = db.query(CatalogPrint).filter(CatalogPrint.id == data.print_id).first()
-        if not catalog_print:
+    selected_print_id = data.print_id if data.print_id is not None else order.print_id
+    selected_print = None
+    if selected_print_id is not None:
+        selected_print = db.query(CatalogPrint).filter(CatalogPrint.id == selected_print_id).first()
+        if not selected_print:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Print with id {data.print_id} not found",
+                detail=f"Print with id {selected_print_id} not found",
             )
-        if not catalog_print.is_active:
+        if not selected_print.is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Selected print is inactive",
             )
+
+    new_print_text = data.print_text if data.print_text is not None else order.print_text
+    new_print_font = data.print_font if data.print_font is not None else order.print_font
+    new_print_side = data.print_side if data.print_side is not None else order.print_side
+    new_print_x = data.print_x if data.print_x is not None else order.print_x
+    new_print_y = data.print_y if data.print_y is not None else order.print_y
+    new_print_angle = data.print_angle if data.print_angle is not None else order.print_angle
+
+    validate_print_payload(
+        print_type=selected_print.print_type if selected_print is not None else None,
+        print_text=new_print_text,
+        print_font=new_print_font,
+        print_side=new_print_side,
+        print_x=new_print_x,
+        print_y=new_print_y,
+        print_angle=new_print_angle,
+    )
 
     old_model_size = (
         db.query(CatalogModelSize)
@@ -383,6 +468,18 @@ def update_order_catalog(order_id: int,
     order.size_id = new_size_id
     if data.print_id is not None:
         order.print_id = data.print_id
+    if data.print_text is not None:
+        order.print_text = data.print_text
+    if data.print_font is not None:
+        order.print_font = data.print_font
+    if data.print_side is not None:
+        order.print_side = data.print_side
+    if data.print_x is not None:
+        order.print_x = data.print_x
+    if data.print_y is not None:
+        order.print_y = data.print_y
+    if data.print_angle is not None:
+        order.print_angle = data.print_angle
 
     log_order_event(db, order.id, "order_catalog_updated", user_id=current_user.id)
     commit_with_rollback(db)
