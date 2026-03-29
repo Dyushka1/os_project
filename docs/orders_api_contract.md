@@ -213,7 +213,102 @@
 
 ---
 
-## 4) Быстрые примеры curl
+## 4) Отмена заказа (Cancel Flow)
+
+### 4.1) Запрос отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_request`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Request body
+```json
+{
+  "reason": "Client changed mind"
+}
+```
+
+### Валидации
+- Заказ должен существовать
+- Разрешён только из статусов: `new`, `confirmed`, `printing`, `printed`, `nanesenie`, `nanesenie_done`, `delivering`
+
+### Побочные эффекты
+- `status -> cancel_requested`
+- Сохраняются поля:
+  - `cancel_reason`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+  - `cancel_requested_from_status`
+- Пишется событие `cancel_requested`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`: `Cannot request cancel from status ...`
+
+---
+
+### 4.2) Подтверждение отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_approve`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Валидации
+- Заказ должен существовать
+- Допустимо только из `cancel_requested`
+
+### Побочные эффекты
+- `status -> canceled`
+- Сохраняются поля:
+  - `canceled_by_user_id`
+  - `canceled_at`
+- Очищаются поля запроса отмены:
+  - `cancel_requested_from_status`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+- Пишется событие `cancel_approved`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`: `Cancel can only be approved from cancel_requested status`
+
+---
+
+### 4.3) Отклонение отмены
+
+**Endpoint:** `POST /orders/{order_id}/cancel_reject`
+
+### Права
+- `ADMIN`, `RECEPTION`
+- Должна быть активная сессия (`require_active_session`)
+
+### Валидации
+- Заказ должен существовать
+- Допустимо только из `cancel_requested`
+- Должен быть сохранён `cancel_requested_from_status`
+
+### Побочные эффекты
+- `status` возвращается в `cancel_requested_from_status`
+- Очищаются поля запроса отмены:
+  - `cancel_requested_from_status`
+  - `cancel_requested_by_user_id`
+  - `cancel_requested_at`
+  - `cancel_reason`
+- Пишется событие `cancel_rejected`
+
+### Типовые ошибки
+- `404`: `Order with id ... not found`
+- `400`:
+  - `Cancel can only be approved from cancel_requested status`
+  - `Original status is missing for cancel reject`
+
+---
+
+## 5) Быстрые примеры curl
 
 > Подставить `<TOKEN>` и реальные id.
 

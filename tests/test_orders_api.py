@@ -14,10 +14,17 @@ from models.catalog_prints import CatalogPrint
 from models.catalog_sizes import CatalogSize
 from models.clients import Client
 from models.order_events import OrderEvent
-from models.orders import Order
+from models.orders import Order, OrderStatus
 from models.sessions import SessionModel
 from models.users import Role, User
 from routers import orders as orders_router
+
+
+def set_current_user_role(role: Role, user_id: int = 1, username: str = "worker"):
+    def override_current_user_with_role():
+        return SimpleNamespace(id=user_id, username=username, role=role)
+
+    app.dependency_overrides[orders_router.get_current_user] = override_current_user_with_role
 
 
 @pytest.fixture()
@@ -413,3 +420,268 @@ def test_update_order_catalog_rejects_invalid_print_payload(api_fixture):
 
     assert update_response.status_code == 400
     assert "print_x must be >= 0" in update_response.json()["detail"]
+
+
+def test_cancel_request_sets_status_reason_and_logs_event(api_fixture):
+    client, session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Cancel Req", "phone": "+79995550001"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/orders/{order_id}/cancel_request",
+        json={"reason": "Client changed mind"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "cancel_requested"
+    assert body["cancel_reason"] == "Client changed mind"
+    assert body["cancel_requested_by_user_id"] is not None
+
+    db = session_local()
+    event = (
+        db.query(OrderEvent)
+        .filter(OrderEvent.order_id == order_id, OrderEvent.event_type == "cancel_requested")
+        .first()
+    )
+    assert event is not None
+    db.close()
+
+
+def test_cancel_approve_moves_order_to_canceled(api_fixture):
+    client, session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Cancel Approve", "phone": "+79995550002"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    request_response = client.post(
+        f"/orders/{order_id}/cancel_request",
+        json={"reason": "Wrong order"},
+    )
+    assert request_response.status_code == 200
+
+    approve_response = client.post(f"/orders/{order_id}/cancel_approve")
+    assert approve_response.status_code == 200
+    body = approve_response.json()
+    assert body["status"] == "canceled"
+    assert body["canceled_by_user_id"] is not None
+    assert body["canceled_at"] is not None
+    assert body["cancel_requested_by_user_id"] is None
+    assert body["cancel_requested_at"] is None
+
+    db = session_local()
+    event = (
+        db.query(OrderEvent)
+        .filter(OrderEvent.order_id == order_id, OrderEvent.event_type == "cancel_approved")
+        .first()
+    )
+    assert event is not None
+    db.close()
+
+
+def test_cancel_reject_returns_order_to_previous_status(api_fixture):
+    client, session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Cancel Reject", "phone": "+79995550003"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    request_response = client.post(
+        f"/orders/{order_id}/cancel_request",
+        json={"reason": "Need review"},
+    )
+    assert request_response.status_code == 200
+    assert request_response.json()["status"] == "cancel_requested"
+
+    reject_response = client.post(f"/orders/{order_id}/cancel_reject")
+    assert reject_response.status_code == 200
+    body = reject_response.json()
+    assert body["status"] == "new"
+    assert body["cancel_reason"] is None
+    assert body["cancel_requested_by_user_id"] is None
+    assert body["cancel_requested_at"] is None
+
+    db = session_local()
+    event = (
+        db.query(OrderEvent)
+        .filter(OrderEvent.order_id == order_id, OrderEvent.event_type == "cancel_rejected")
+        .first()
+    )
+    assert event is not None
+    db.close()
+
+
+def test_cancel_request_rejects_issued_order(api_fixture):
+    client, session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Issued Cancel", "phone": "+79995550004"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    db = session_local()
+    order = db.query(Order).filter(Order.id == order_id).first()
+    assert order is not None
+    order.status = OrderStatus.ISSUED.value
+    db.commit()
+    db.close()
+
+    response = client.post(
+        f"/orders/{order_id}/cancel_request",
+        json={"reason": "Too late"},
+    )
+
+    assert response.status_code == 400
+    assert "Cannot request cancel from status issued" in response.json()["detail"]
+
+
+def test_cancel_request_requires_non_empty_reason(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Cancel Empty", "phone": "+79995550005"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/orders/{order_id}/cancel_request",
+        json={"reason": "   "},
+    )
+
+    assert response.status_code == 400
+    assert "Cancel reason is required" in response.json()["detail"]
+
+
+def test_cancel_reject_rejects_non_cancel_requested_status(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Reject Invalid", "phone": "+79995550006"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order_id = create_response.json()["id"]
+
+    response = client.post(f"/orders/{order_id}/cancel_reject")
+
+    assert response.status_code == 400
+    assert "Cancel can only be rejected from cancel_requested status" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "role,path,payload",
+    [
+        (Role.RECEPTION, "/orders/999/take_print", None),
+        (Role.PRINT, "/orders/999/take_nanesenie", None),
+        (Role.PRINT, "/orders/999/start_delivery", None),
+        (Role.RECEPTION, "/orders/999/issue", None),
+        (Role.PRINT, "/orders/999/cancel_request", {"reason": "no rights"}),
+        (Role.PRINT, "/orders/999/cancel_approve", None),
+        (Role.PRINT, "/orders/999/cancel_reject", None),
+    ],
+)
+
+def test_role_restrictions_for_production_endpoints(api_fixture, role, path, payload):
+    client, _session_local, _ids = api_fixture
+    set_current_user_role(role)
+
+    response = client.post(path, json=payload) if payload is not None else client.post(path)
+
+    assert response.status_code == 403
+
+def test_smoke_order_lifecycle_happy_path(api_fixture):
+    client, _session_local, ids = api_fixture
+
+    # 1) create
+    create_response = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Smoke User", "phone": "+79996667788"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+            "print_id": ids["print_1_id"],
+        },
+    )
+    assert create_response.status_code == 200
+    order = create_response.json()
+    order_id = order["id"]
+    assert order["status"] == "new"
+
+    # 2) confirm
+    confirm_response = client.put(
+        f"/orders/{order_id}",
+        json={"status": "confirmed"},
+    )
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["status"] == "confirmed"
+
+    # 3) take print
+    take_print_response = client.post(f"/orders/{order_id}/take_print")
+    assert take_print_response.status_code == 200
+    assert take_print_response.json()["status"] == "printing"
+
+    # 4) finish print
+    finish_print_response = client.post(f"/orders/{order_id}/finish_print")
+    assert finish_print_response.status_code == 200
+    assert finish_print_response.json()["status"] == "printed"
+
+    # 5) take nanesenie
+    take_nanesenie_response = client.post(f"/orders/{order_id}/take_nanesenie")
+    assert take_nanesenie_response.status_code == 200
+    assert take_nanesenie_response.json()["status"] == "nanesenie"
+
+    # 6) finish nanesenie
+    finish_nanesenie_response = client.post(f"/orders/{order_id}/finish_nanesenie")
+    assert finish_nanesenie_response.status_code == 200
+    assert finish_nanesenie_response.json()["status"] == "nanesenie_done"
+
+    # 7) start delivery
+    start_delivery_response = client.post(f"/orders/{order_id}/start_delivery")
+    assert start_delivery_response.status_code == 200
+    assert start_delivery_response.json()["status"] == "delivering"
+
+    # 8) issue
+    issue_response = client.post(f"/orders/{order_id}/issue")
+    assert issue_response.status_code == 200
+    assert issue_response.json()["status"] == "issued"
+    
