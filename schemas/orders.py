@@ -10,6 +10,15 @@ class OrderCreate(BaseModel):
     model_id: int
     size_id: int
     print_id: int | None = None
+    promo_code: str | None = None
+    notify_method: str | None = None  # e.g. "sms", "email"
+    notify_contact: str | None = None  # e.g. phone number or email address
+    print_text: str | None = None
+    print_font: str | None = None
+    print_side: str | None = None
+    print_x: int | None = None
+    print_y: int | None = None
+    print_angle: float | None = None
 
 
 class OrderRead(BaseModel):
@@ -35,12 +44,23 @@ class OrderRead(BaseModel):
     time_print_finished: datetime | None = None
     time_issued: datetime | None = None
     
-    session_id: int | None = None
+    promo_code: str | None = None
+    notify_method: str | None = None
+    notify_contact: str | None = None
+
+    print_text: str | None = None
+    print_font: str | None = None
+    print_side: str | None = None
+    print_x: int | None = None
+    print_y: int | None = None
+    print_angle: float | None = None
     
     color_id: int | None = None
     model_id: int | None = None
     size_id: int | None = None
     print_id: int | None = None
+    
+    session_id: int | None = None
 
 class OrderUpdate(BaseModel):
     status: OrderStatus | None = None
@@ -50,6 +70,12 @@ class OrderCatalogUpdate(BaseModel):
     model_id: int | None = None
     size_id: int | None = None
     print_id: int | None = None
+    print_text: str | None = None
+    print_font: str | None = None
+    print_side: str | None = None
+    print_x: int | None = None
+    print_y: int | None = None
+    print_angle: float | None = None
     
 class OrderCancelRequest(BaseModel):
     reason: str
