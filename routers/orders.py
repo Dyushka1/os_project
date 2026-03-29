@@ -39,6 +39,22 @@ def log_order_event(db: Session, order_id: int, event_type: str, user_id: int | 
     db.add(event)
 
 
+def get_order_or_404(db: Session, order_id: int) -> Order:
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+    return order
+
+
+def clear_cancel_request_fields(order: Order) -> None:
+    order.cancel_requested_from_status = None
+    order.cancel_requested_at = None
+    order.cancel_requested_by_user_id = None
+
+
 def validate_print_payload(
     print_type: str | None,
     print_text: str | None,
@@ -852,12 +868,7 @@ def request_cancel_order(order_id: int,
                          current_user: User = Depends(get_current_user),
                          session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
+    order = get_order_or_404(db, order_id)
 
     validate_cancel_request(order.status)
 
@@ -883,22 +894,32 @@ def approve_cancel_order(order_id: int,
                          current_user: User = Depends(get_current_user),
                          session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
+    order = get_order_or_404(db, order_id)
     validate_cancel_approve(order.status)
+
+    from_status = order.cancel_requested_from_status
+    if from_status in {OrderStatus.NEW.value, OrderStatus.CONFIRMED.value}:
+        current_model_size = (
+            db.query(CatalogModelSize)
+            .filter(
+                CatalogModelSize.model_id == order.model_id,
+                CatalogModelSize.size_id == order.size_id,
+            )
+            .first()
+        )
+        if not current_model_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current order model-size combination is invalid",
+            )
+        current_model_size.stock_qty += 1
     order.status = OrderStatus.CANCELED.value
     log_order_event(db, order.id, "cancel_approved", user_id=current_user.id)
     order.canceled_by_user_id = current_user.id
     if not order.cancel_reason:
         order.cancel_reason = f"Cancel approved by {current_user.username} (id: {current_user.id})"
     order.canceled_at = datetime.now(timezone.utc)
-    order.cancel_requested_from_status = None
-    order.cancel_requested_at = None
-    order.cancel_requested_by_user_id = None
+    clear_cancel_request_fields(order)
     commit_with_rollback(db)
     db.refresh(order)
     return order    
@@ -909,12 +930,7 @@ def reject_cancel_order(order_id: int,
                         current_user: User = Depends(get_current_user),
                         session = Depends(require_active_session)):
     require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
+    order = get_order_or_404(db, order_id)
     if order.status != OrderStatus.CANCEL_REQUESTED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -928,9 +944,7 @@ def reject_cancel_order(order_id: int,
 
     order.status = order.cancel_requested_from_status
     log_order_event(db, order.id, "cancel_rejected", user_id=current_user.id)
-    order.cancel_requested_from_status = None
-    order.cancel_requested_at = None
-    order.cancel_requested_by_user_id = None
+    clear_cancel_request_fields(order)
     order.cancel_reason = None
     commit_with_rollback(db)
     db.refresh(order)
@@ -948,4 +962,3 @@ def delete_order(order_id: int, db: Session = Depends(get_db), current_user: Use
     db.delete(order)
     commit_with_rollback(db)
     return {"detail": f"Order {order_id} deleted"}
-

@@ -643,45 +643,48 @@ def test_smoke_order_lifecycle_happy_path(api_fixture):
         },
     )
     assert create_response.status_code == 200
-    order = create_response.json()
-    order_id = order["id"]
-    assert order["status"] == "new"
+    order_payload = create_response.json()
+    order_id = order_payload["id"]
+    assert order_payload["status"] == "new"
 
-    # 2) confirm
-    confirm_response = client.put(
-        f"/orders/{order_id}",
-        json={"status": "confirmed"},
-    )
+    confirm_response = client.put(f"/orders/{order_id}", json={"status": "confirmed"})
     assert confirm_response.status_code == 200
-    assert confirm_response.json()["status"] == "confirmed"
+    confirmed_payload = confirm_response.json()
+    assert confirmed_payload["status"] == "confirmed"
+    assert confirmed_payload["time_confirmed"] is not None
 
-    # 3) take print
     take_print_response = client.post(f"/orders/{order_id}/take_print")
     assert take_print_response.status_code == 200
-    assert take_print_response.json()["status"] == "printing"
+    printing_payload = take_print_response.json()
+    assert printing_payload["status"] == "printing"
+    assert printing_payload["print_master_id"] is not None
+    assert printing_payload["time_print_started"] is not None
 
-    # 4) finish print
     finish_print_response = client.post(f"/orders/{order_id}/finish_print")
     assert finish_print_response.status_code == 200
-    assert finish_print_response.json()["status"] == "printed"
+    printed_payload = finish_print_response.json()
+    assert printed_payload["status"] == "printed"
+    assert printed_payload["time_print_finished"] is not None
 
-    # 5) take nanesenie
     take_nanesenie_response = client.post(f"/orders/{order_id}/take_nanesenie")
     assert take_nanesenie_response.status_code == 200
-    assert take_nanesenie_response.json()["status"] == "nanesenie"
+    nanesenie_payload = take_nanesenie_response.json()
+    assert nanesenie_payload["status"] == "nanesenie"
+    assert nanesenie_payload["nanesenie_master_id"] is not None
 
-    # 6) finish nanesenie
     finish_nanesenie_response = client.post(f"/orders/{order_id}/finish_nanesenie")
     assert finish_nanesenie_response.status_code == 200
-    assert finish_nanesenie_response.json()["status"] == "nanesenie_done"
+    nanesenie_done_payload = finish_nanesenie_response.json()
+    assert nanesenie_done_payload["status"] == "nanesenie_done"
 
-    # 7) start delivery
     start_delivery_response = client.post(f"/orders/{order_id}/start_delivery")
     assert start_delivery_response.status_code == 200
-    assert start_delivery_response.json()["status"] == "delivering"
+    delivering_payload = start_delivery_response.json()
+    assert delivering_payload["status"] == "delivering"
 
-    # 8) issue
     issue_response = client.post(f"/orders/{order_id}/issue")
     assert issue_response.status_code == 200
-    assert issue_response.json()["status"] == "issued"
-    
+    issued_payload = issue_response.json()
+    assert issued_payload["status"] == "issued"
+    assert issued_payload["issue_master_id"] is not None
+    assert issued_payload["time_issued"] is not None
