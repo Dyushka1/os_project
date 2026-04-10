@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Table, Input, Card } from "antd";
+import { Table, Input, Card, Button } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchOrders } from "./ordersApi";
@@ -50,6 +50,9 @@ export default function OrdersList() {
           onClick: () => navigate(`/orders/${record.id}`),
         })}
       />
+      <Button type="primary" onClick={() => navigate("/orders/new")}>
+        Новый заказ
+      </Button>
     </Card>
   );
 }

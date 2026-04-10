@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import OrdersList from "./features/orders/OrdersList";
 import OrderDetails from "./features/orders/OrderDetails";
+import CreateOrder from "./features/orders/OrderCreate";
 import Login from "./pages/Login";
 
 export default function App() {
@@ -8,6 +9,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/orders" element={<OrdersList />} />
+      <Route path="/orders/new" element={<CreateOrder />} />
       <Route path="/orders/:id" element={<OrderDetails />} />
       <Route path="*" element={<Navigate to="/orders" replace />} />
     </Routes>

@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const baseURL = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";
+const envBaseURL = ((import.meta.env.VITE_API_BASE_URL as string) || "").trim();
+const baseURL = envBaseURL || "http://127.0.0.1:8000";
+const isNgrokBase = baseURL.includes("ngrok-free.dev") || baseURL.includes("ngrok.app");
 
 const api = axios.create({
   baseURL,
@@ -10,6 +12,9 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+  if (isNgrokBase && config.headers) {
+    config.headers["ngrok-skip-browser-warning"] = "true";
+  }
   const token = localStorage.getItem("token");
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
