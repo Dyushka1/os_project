@@ -18,6 +18,7 @@ from routers import (
     catalog_prints,
     catalog_model_sizes,
     branding,
+    promo_codes,
 )
 from database import Base, engine
 from models.orders import Order
@@ -26,6 +27,7 @@ from models.delivery import Delivery
 from models.print_job import PrintJob
 from models.sessions import SessionModel
 from models.order_events import OrderEvent
+from models.promo_codes import PromoCode
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -58,6 +60,7 @@ app.include_router(catalog_models.router)
 app.include_router(catalog_prints.router)
 app.include_router(catalog_model_sizes.router)
 app.include_router(branding.router)
+app.include_router(promo_codes.router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

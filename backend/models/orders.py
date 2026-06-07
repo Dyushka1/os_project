@@ -104,4 +104,15 @@ class Order(Base):
     print_scale_x = Column(Integer, nullable=True)
     print_scale_y = Column(Integer, nullable=True)
 
+    print2_id = Column(Integer, ForeignKey("catalog_prints.id"), nullable=True, index=True)
+    print2_text = Column(String, nullable=True)
+    print2_font = Column(String, nullable=True)
+    print2_side = Column(String, nullable=True)
+    print2_x = Column(Integer, nullable=True)
+    print2_y = Column(Integer, nullable=True)
+    print2_angle = Column(Float, nullable=True)
+    print2_scale = Column(Integer, nullable=True)
+    print2_scale_x = Column(Integer, nullable=True)
+    print2_scale_y = Column(Integer, nullable=True)
+
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)

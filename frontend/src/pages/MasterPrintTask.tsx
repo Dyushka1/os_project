@@ -28,6 +28,21 @@ type NanesenieMasterTaskRead = {
   print_scale: number | null;
   print_width: number | null;
   print_height: number | null;
+  print2_id: number | null;
+  print2_name: string | null;
+  print2_type: string | null;
+  print2_image_url: string | null;
+  print2_text: string | null;
+  print2_font: string | null;
+  print2_side: string | null;
+  print2_x: number | null;
+  print2_y: number | null;
+  print2_angle: number | null;
+  print2_scale: number | null;
+  print2_scale_x: number | null;
+  print2_scale_y: number | null;
+  print2_width: number | null;
+  print2_height: number | null;
   front_image_url?: string | null;
   back_image_url?: string | null;
 };
@@ -105,6 +120,7 @@ export default function MasterPrintTask() {
   };
 
   const isTextPrint = TEXT_PRINT_TYPES.has(task?.print_type ?? "");
+  const isTextPrint2 = TEXT_PRINT_TYPES.has(task?.print2_type ?? "");
 
   if (taskQuery.isLoading) {
     return (
@@ -232,10 +248,73 @@ export default function MasterPrintTask() {
             printY={task.print_y ?? undefined}
             printAngle={task.print_angle ?? undefined}
             printScale={task.print_scale ?? undefined}
+            print2={task.print2_id ? { name: task.print2_name ?? undefined, print_type: task.print2_type ?? undefined, image_url: task.print2_image_url } : undefined}
+            print2Text={task.print2_text ?? undefined}
+            print2Font={task.print2_font ?? undefined}
+            print2Side={task.print2_side ?? undefined}
+            print2X={task.print2_x ?? undefined}
+            print2Y={task.print2_y ?? undefined}
+            print2Angle={task.print2_angle ?? undefined}
+            print2Scale={task.print2_scale ?? undefined}
             editable={false}
           />
         </div>
       </Card>
+
+      {/* Принт 2 */}
+      {task.print2_id || task.print2_text ? (
+        <Card title="Принт 2" style={{ marginBottom: 16, borderColor: "#fa8c16", borderWidth: 2 }}>
+          <Descriptions column={1} bordered size="small">
+            {!isTextPrint2 && task.print2_id && (
+              <Descriptions.Item label="Номер нанесения">
+                <Text strong style={{ fontSize: 20, color: "#fa8c16" }}>#{task.print2_id}</Text>
+              </Descriptions.Item>
+            )}
+            {task.print2_name && (
+              <Descriptions.Item label="Название">
+                <Text strong>{task.print2_name}</Text>
+              </Descriptions.Item>
+            )}
+            {(task.print2_width != null || task.print2_height != null) && (
+              <Descriptions.Item label="Размер нанесения">
+                <Text code style={{ fontSize: 16 }}>
+                  {task.print2_width ?? "?"} × {task.print2_height ?? "?"} мм
+                </Text>
+              </Descriptions.Item>
+            )}
+            {isTextPrint2 && task.print2_text && (
+              <Descriptions.Item label="Текст надписи">
+                <Text strong style={{ fontSize: 20 }}>{task.print2_text}</Text>
+              </Descriptions.Item>
+            )}
+            {isTextPrint2 && task.print2_font && (
+              <Descriptions.Item label="Шрифт">
+                <Text code style={{ fontSize: 16 }}>{task.print2_font}</Text>
+              </Descriptions.Item>
+            )}
+            {task.print2_side && (
+              <Descriptions.Item label="Сторона">
+                <Text strong>{task.print2_side === "front" ? "Спереди" : task.print2_side === "back" ? "Сзади" : task.print2_side}</Text>
+              </Descriptions.Item>
+            )}
+            {task.print2_scale != null && (
+              <Descriptions.Item label="Масштаб">
+                <Text code style={{ fontSize: 16 }}>{task.print2_scale}%</Text>
+              </Descriptions.Item>
+            )}
+            {task.print2_x != null && task.print2_y != null && (
+              <Descriptions.Item label="Позиция">
+                <Text code style={{ fontSize: 16 }}>X: {task.print2_x}, Y: {task.print2_y}</Text>
+              </Descriptions.Item>
+            )}
+            {task.print2_angle != null && task.print2_angle !== 0 && (
+              <Descriptions.Item label="Угол">
+                <Text code style={{ fontSize: 16 }}>{task.print2_angle}°</Text>
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </Card>
+      ) : null}
 
       {/* Кнопки */}
       <Space direction="vertical" style={{ width: "100%" }} size={12}>
