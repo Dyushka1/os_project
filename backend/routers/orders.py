@@ -15,6 +15,7 @@ from models.catalog_model_sizes import CatalogModelSize
 from models.catalog_models import CatalogModel
 from models.catalog_sizes import CatalogSize
 from models.catalog_prints import CatalogPrint
+from models.promo_codes import PromoCode
 from models.catalog_colors import CatalogColors
 from models.sessions import SessionModel
 from datetime import datetime, timezone
@@ -81,11 +82,54 @@ def _build_print_master_task(order: Order, db: Session) -> PrintMasterTaskRead:
         print_y=order.print_y,
         print_angle=order.print_angle,
         print_scale=order.print_scale,
+        print_scale_x=order.print_scale_x,
+        print_scale_y=order.print_scale_y,
         print_text=order.print_text,
         print_font=order.print_font,
+        print2_id=order.print2_id,
+        print2_name=_resolve_print_name(db, order.print2_id),
+        print2_type=_resolve_print_type(db, order.print2_id),
+        print2_image_url=_resolve_print_image_url(db, order.print2_id),
+        print2_text=order.print2_text,
+        print2_font=order.print2_font,
+        print2_side=order.print2_side,
+        print2_x=order.print2_x,
+        print2_y=order.print2_y,
+        print2_angle=order.print2_angle,
+        print2_scale=order.print2_scale,
+        print2_scale_x=order.print2_scale_x,
+        print2_scale_y=order.print2_scale_y,
         front_image_url=front_image_url,
         back_image_url=back_image_url,
     )
+
+
+def _resolve_print_name(db: Session, print_id: int | None) -> str | None:
+    if not print_id:
+        return None
+    p = db.query(CatalogPrint).filter(CatalogPrint.id == print_id).first()
+    return p.name if p else None
+
+
+def _resolve_print_type(db: Session, print_id: int | None) -> str | None:
+    if not print_id:
+        return None
+    p = db.query(CatalogPrint).filter(CatalogPrint.id == print_id).first()
+    return p.print_type if p else None
+
+
+def _resolve_print_image_url(db: Session, print_id: int | None) -> str | None:
+    if not print_id:
+        return None
+    p = db.query(CatalogPrint).filter(CatalogPrint.id == print_id).first()
+    return p.image_url if p else None
+
+
+def _resolve_print_dimensions(db: Session, print_id: int | None) -> tuple[int | None, int | None]:
+    if not print_id:
+        return None, None
+    p = db.query(CatalogPrint).filter(CatalogPrint.id == print_id).first()
+    return (p.width, p.height) if p else (None, None)
 
 
 def _build_nanesenie_master_task(order: Order, db: Session) -> NanesenieMasterTaskRead:
@@ -148,8 +192,25 @@ def _build_nanesenie_master_task(order: Order, db: Session) -> NanesenieMasterTa
         print_y=order.print_y,
         print_angle=order.print_angle,
         print_scale=order.print_scale,
+        print_scale_x=order.print_scale_x,
+        print_scale_y=order.print_scale_y,
         print_width=print_width,
         print_height=print_height,
+        print2_id=order.print2_id,
+        print2_name=_resolve_print_name(db, order.print2_id),
+        print2_type=_resolve_print_type(db, order.print2_id),
+        print2_image_url=_resolve_print_image_url(db, order.print2_id),
+        print2_text=order.print2_text,
+        print2_font=order.print2_font,
+        print2_side=order.print2_side,
+        print2_x=order.print2_x,
+        print2_y=order.print2_y,
+        print2_angle=order.print2_angle,
+        print2_scale=order.print2_scale,
+        print2_scale_x=order.print2_scale_x,
+        print2_scale_y=order.print2_scale_y,
+        print2_width=_resolve_print_dimensions(db, order.print2_id)[0],
+        print2_height=_resolve_print_dimensions(db, order.print2_id)[1],
         front_image_url=front_image_url,
         back_image_url=back_image_url,
     )
@@ -252,6 +313,18 @@ def serialize_order(order: Order, db: Session) -> dict:
         "print_y": order.print_y,
         "print_angle": order.print_angle,
         "print_scale": order.print_scale,
+        "print_scale_x": order.print_scale_x,
+        "print_scale_y": order.print_scale_y,
+        "print2_id": order.print2_id,
+        "print2_text": order.print2_text,
+        "print2_font": order.print2_font,
+        "print2_side": order.print2_side,
+        "print2_x": order.print2_x,
+        "print2_y": order.print2_y,
+        "print2_angle": order.print2_angle,
+        "print2_scale": order.print2_scale,
+        "print2_scale_x": order.print2_scale_x,
+        "print2_scale_y": order.print2_scale_y,
         "color_id": order.color_id,
         "model_id": order.model_id,
         "size_id": order.size_id,
@@ -555,6 +628,18 @@ def create_order(order: OrderCreate,
             )
 
     selected_print_type = catalog_print.print_type if order.print_id is not None else None
+
+    if order.promo_code:
+        promo = db.query(PromoCode).filter(
+            PromoCode.code == order.promo_code.strip().upper(),
+            PromoCode.is_active == True,
+        ).first()
+        if not promo:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Промокод не найден или неактивен",
+            )
+
     validate_notify_payload(order.notify_method, order.notify_contact)
 
     if order.client is not None:
@@ -614,7 +699,19 @@ def create_order(order: OrderCreate,
                       print_x=order.print_x,
                       print_y=order.print_y,
                       print_angle=order.print_angle,
-                      print_scale=order.print_scale,)
+                      print_scale=order.print_scale,
+                      print_scale_x=order.print_scale_x,
+                      print_scale_y=order.print_scale_y,
+                      print2_id=order.print2_id,
+                      print2_text=order.print2_text,
+                      print2_font=order.print2_font,
+                      print2_side=order.print2_side,
+                      print2_x=order.print2_x,
+                      print2_y=order.print2_y,
+                      print2_angle=order.print2_angle,
+                      print2_scale=order.print2_scale,
+                      print2_scale_x=order.print2_scale_x,
+                      print2_scale_y=order.print2_scale_y,)
     model_and_size.stock_qty -= 1
     db.add(new_order)
     db.flush()
@@ -810,6 +907,30 @@ def update_order_catalog(order_id: int,
         order.print_angle = data.print_angle
     if data.print_scale is not None:
         order.print_scale = data.print_scale
+    if data.print_scale_x is not None:
+        order.print_scale_x = data.print_scale_x
+    if data.print_scale_y is not None:
+        order.print_scale_y = data.print_scale_y
+    if data.print2_id is not None:
+        order.print2_id = data.print2_id
+    if data.print2_text is not None:
+        order.print2_text = data.print2_text
+    if data.print2_font is not None:
+        order.print2_font = data.print2_font
+    if data.print2_side is not None:
+        order.print2_side = data.print2_side
+    if data.print2_x is not None:
+        order.print2_x = data.print2_x
+    if data.print2_y is not None:
+        order.print2_y = data.print2_y
+    if data.print2_angle is not None:
+        order.print2_angle = data.print2_angle
+    if data.print2_scale is not None:
+        order.print2_scale = data.print2_scale
+    if data.print2_scale_x is not None:
+        order.print2_scale_x = data.print2_scale_x
+    if data.print2_scale_y is not None:
+        order.print2_scale_y = data.print2_scale_y
 
     log_order_event(db, order.id, "order_catalog_updated", user_id=current_user.id)
     commit_with_rollback(db)

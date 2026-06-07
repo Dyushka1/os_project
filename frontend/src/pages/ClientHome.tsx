@@ -130,11 +130,27 @@ export default function ClientHome() {
   const [printY, setPrintY] = useState<number>(50);
   const [printAngle, setPrintAngle] = useState<number>(0);
   const [printScale, setPrintScale] = useState<number>(100);
+  const [printScaleX, setPrintScaleX] = useState<number>(100);
+  const [printScaleY, setPrintScaleY] = useState<number>(100);
   const [printText, setPrintText] = useState<string>("");
   const [printFont, setPrintFont] = useState<string>("Arial");
 
+  const [activePrintSlot, setActivePrintSlot] = useState<1 | 2>(1);
+  const [selectedPrint2Id, setSelectedPrint2Id] = useState<number | undefined>(undefined);
+  const [print2Side, setPrint2Side] = useState<"front" | "back">("back");
+  const [print2X, setPrint2X] = useState<number>(50);
+  const [print2Y, setPrint2Y] = useState<number>(50);
+  const [print2Angle, setPrint2Angle] = useState<number>(0);
+  const [print2Scale, setPrint2Scale] = useState<number>(100);
+  const [print2ScaleX, setPrint2ScaleX] = useState<number>(100);
+  const [print2ScaleY, setPrint2ScaleY] = useState<number>(100);
+  const [print2Text, setPrint2Text] = useState<string>("");
+  const [print2Font, setPrint2Font] = useState<string>("Arial");
+
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState<CreateOrderPayload | null>(null);
+  const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  const [promoDescription, setPromoDescription] = useState<string | null>(null);
 
   const colorsQuery = useQuery({
     queryKey: ["client-catalog-colors"],
@@ -224,6 +240,7 @@ export default function ClientHome() {
   const selectedModel = activeModels.find((item) => item.id === selectedModelId);
   const selectedSize = activeSizes.find((item) => item.id === selectedSizeId);
   const selectedPrint = selectedPrintId === CUSTOM_TEXT_PRINT_ID ? CUSTOM_TEXT_PRINT : orderedPrints.find((item) => item.id === selectedPrintId);
+  const selectedPrint2 = selectedPrint2Id === CUSTOM_TEXT_PRINT_ID ? CUSTOM_TEXT_PRINT : orderedPrints.find((item) => item.id === selectedPrint2Id);
 
   const hasQueryError = colorsQuery.isError || modelsQuery.isError || sizesQuery.isError || modelSizesQuery.isError || printsQuery.isError;
   const isLoadingCatalog = colorsQuery.isLoading || modelsQuery.isLoading || sizesQuery.isLoading || modelSizesQuery.isLoading || printsQuery.isLoading;
@@ -264,11 +281,26 @@ export default function ClientHome() {
     setPrintY(50);
     setPrintAngle(0);
     setPrintScale(100);
+    setPrintScaleX(100);
+    setPrintScaleY(100);
     setPrintText("");
     setPrintFont("Arial");
+    setActivePrintSlot(1);
+    setSelectedPrint2Id(undefined);
+    setPrint2Side("back");
+    setPrint2X(50);
+    setPrint2Y(50);
+    setPrint2Angle(0);
+    setPrint2Scale(100);
+    setPrint2ScaleX(100);
+    setPrint2ScaleY(100);
+    setPrint2Text("");
+    setPrint2Font("Arial");
     confirmForm.resetFields();
     setConfirmModalVisible(false);
     setConfirmPayload(null);
+    setPromoStatus("idle");
+    setPromoDescription(null);
   }
 
   useEffect(() => {
@@ -340,6 +372,18 @@ export default function ClientHome() {
       print_y: printY,
       print_angle: printAngle,
       print_scale: printScale,
+      print_scale_x: printScaleX,
+      print_scale_y: printScaleY,
+      print2_id: selectedPrint2Id === CUSTOM_TEXT_PRINT_ID ? undefined : selectedPrint2Id,
+      print2_text: isTextPrint(selectedPrint2) ? (print2Text || undefined) : undefined,
+      print2_font: isTextPrint(selectedPrint2) ? print2Font : undefined,
+      print2_side: selectedPrint2Id ? print2Side : undefined,
+      print2_x: selectedPrint2Id ? print2X : undefined,
+      print2_y: selectedPrint2Id ? print2Y : undefined,
+      print2_angle: selectedPrint2Id ? print2Angle : undefined,
+      print2_scale: selectedPrint2Id ? print2Scale : undefined,
+      print2_scale_x: selectedPrint2Id ? print2ScaleX : undefined,
+      print2_scale_y: selectedPrint2Id ? print2ScaleY : undefined,
     };
 
     setConfirmPayload(payload);
@@ -401,16 +445,37 @@ export default function ClientHome() {
                 printY={printY}
                 printAngle={printAngle}
                 printScale={printScale}
+                printScaleX={printScaleX}
+                printScaleY={printScaleY}
+                print2={selectedPrint2}
+                print2Text={print2Text}
+                print2Font={print2Font}
+                print2Side={selectedPrint2Id ? print2Side : undefined}
+                print2X={print2X}
+                print2Y={print2Y}
+                print2Angle={print2Angle}
+                print2Scale={print2Scale}
+                print2ScaleX={print2ScaleX}
+                print2ScaleY={print2ScaleY}
                 onUpdatePrint={(u: GarmentPreviewUpdate) => {
                   if (typeof u.printX === "number") setPrintX(u.printX);
                   if (typeof u.printY === "number") setPrintY(u.printY);
                   if (typeof u.printAngle === "number") setPrintAngle(u.printAngle);
                   if (typeof u.printScale === "number") setPrintScale(u.printScale);
+                  if (typeof u.printScaleX === "number") setPrintScaleX(u.printScaleX);
+                  if (typeof u.printScaleY === "number") setPrintScaleY(u.printScaleY);
                   if (u.printSide && ["front", "back"].includes(String(u.printSide))) {
                     setPrintSide(u.printSide as "front" | "back");
                   }
                 }}
-                editable={step === 3 && !!selectedPrintId}
+                onUpdatePrint2={(u) => {
+                  if (typeof u.print2X === "number") setPrint2X(u.print2X);
+                  if (typeof u.print2Y === "number") setPrint2Y(u.print2Y);
+                  if (typeof u.print2Angle === "number") setPrint2Angle(u.print2Angle);
+                  if (typeof u.print2ScaleX === "number") setPrint2ScaleX(u.print2ScaleX);
+                  if (typeof u.print2ScaleY === "number") setPrint2ScaleY(u.print2ScaleY);
+                }}
+                editable={step === 3 && (activePrintSlot === 1 ? !!selectedPrintId : !!selectedPrint2Id)}
               />
             </div>
           </Col>
@@ -504,73 +569,124 @@ export default function ClientHome() {
                 <Space direction="vertical" size={12} style={{ width: "100%" }}>
                   <Text strong>Шаг 4. Выберите принт</Text>
                   {selectedSize ? <Text type="secondary">Выбранный размер: {selectedSize.code}</Text> : null}
-                  {orderedPrints.length ? (
-                    renderCards(
-                      orderedPrints,
-                      (item) => item.name + (isTextPrint(item) ? " · Свой текст" : ""),
-                      (item) => item.print_type,
-                      (item) => {
-                        setSelectedPrintId(item.id);
-                        // reset text/font for text prints or defaults for image prints
-                        setPrintText("");
-                        setPrintFont("Arial");
-                        setPrintSide("front");
-                        setPrintX(50);
-                        setPrintY(50);
-                        setPrintAngle(0);
-                        setPrintScale(100);
-                      },
-                      selectedPrintId,
-                    )
-                  ) : (
-                    <Alert type="info" showIcon message="Нет доступных принтов" />
-                  )}
 
-                  <Card size="small" title="Управление принтом" style={{ marginTop: 8 }}>
-                    <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                      <Select
-                        value={printSide}
-                        onChange={(v) => setPrintSide(v as "front" | "back")}
-                        style={{ width: 220 }}
-                        options={PRINT_SIDES}
-                      />
-                      <Alert
-                        type="info"
-                        showIcon
-                        message="Тяните рамку по области принта"
-                        description="Нижний правый маркер меняет размер, верхний маркер крутит принт, сама рамка двигается мышкой."
-                      />
-                      <Button
-                        onClick={() => {
+                  <Space>
+                    <Button
+                      type={activePrintSlot === 1 ? "primary" : "default"}
+                      onClick={() => {
+                        setActivePrintSlot(1);
+                        if (printSide === "front" || printSide === "back") setPreviewSide(printSide);
+                      }}
+                    >
+                      Принт 1 {selectedPrintId ? "✓" : ""}
+                    </Button>
+                    <Button
+                      type={activePrintSlot === 2 ? "primary" : "default"}
+                      onClick={() => {
+                        setActivePrintSlot(2);
+                        if (print2Side === "front" || print2Side === "back") setPreviewSide(print2Side);
+                      }}
+                    >
+                      Принт 2 (необязательно) {selectedPrint2Id ? "✓" : ""}
+                    </Button>
+                  </Space>
+
+                  {activePrintSlot === 1 ? (<>
+                    {orderedPrints.length ? (
+                      renderCards(
+                        orderedPrints,
+                        (item) => item.name + (isTextPrint(item) ? " · Свой текст" : ""),
+                        (item) => item.print_type,
+                        (item) => {
+                          setSelectedPrintId(item.id);
+                          setPrintText("");
+                          setPrintFont("Arial");
+                          setPrintSide("front");
                           setPrintX(50);
                           setPrintY(50);
                           setPrintAngle(0);
                           setPrintScale(100);
-                        }}
-                      >
-                        Сбросить размещение
-                      </Button>
-                    </Space>
-                    {isTextPrint(selectedPrint) ? (
-                      <div style={{ marginTop: 12 }}>
-                        <Alert
-                          type="info"
-                          showIcon
-                          message="Текстовый принт"
-                          description="Введите текст и шрифт для текстового принта."
+                          setPrintScaleX(100);
+                          setPrintScaleY(100);
+                        },
+                        selectedPrintId,
+                      )
+                    ) : (
+                      <Alert type="info" showIcon message="Нет доступных принтов" />
+                    )}
+                    <Card size="small" title="Управление принтом 1" style={{ marginTop: 8 }}>
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <Select
+                          value={printSide}
+                          onChange={(v) => setPrintSide(v as "front" | "back")}
+                          style={{ width: 220 }}
+                          options={PRINT_SIDES}
                         />
-                        <Space direction="vertical" style={{ marginTop: 8, width: "100%" }}>
-                          <Input placeholder="Текст на принте" value={printText} onChange={(e) => setPrintText(e.target.value)} />
-                          <Select
-                            value={printFont}
-                            onChange={(value) => setPrintFont(value)}
-                            options={CUSTOM_TEXT_FONTS}
-                            style={{ width: "100%" }}
-                          />
-                        </Space>
-                      </div>
-                    ) : null}
-                  </Card>
+                        <Alert type="info" showIcon message="Тяните рамку по области принта" description="Нижний правый маркер меняет размер, верхний маркер крутит принт, сама рамка двигается мышкой." />
+                        <Button onClick={() => { setPrintX(50); setPrintY(50); setPrintAngle(0); setPrintScale(100); setPrintScaleX(100); setPrintScaleY(100); }}>
+                          Сбросить размещение
+                        </Button>
+                      </Space>
+                      {isTextPrint(selectedPrint) ? (
+                        <div style={{ marginTop: 12 }}>
+                          <Space direction="vertical" style={{ width: "100%" }}>
+                            <Input placeholder="Текст на принте" value={printText} onChange={(e) => setPrintText(e.target.value)} />
+                            <Select value={printFont} onChange={(value) => setPrintFont(value)} options={CUSTOM_TEXT_FONTS} style={{ width: "100%" }} />
+                          </Space>
+                        </div>
+                      ) : null}
+                    </Card>
+                  </>) : (<>
+                    {orderedPrints.length ? (
+                      renderCards(
+                        orderedPrints,
+                        (item) => item.name + (isTextPrint(item) ? " · Свой текст" : ""),
+                        (item) => item.print_type,
+                        (item) => {
+                          setSelectedPrint2Id(item.id);
+                          setPrint2Text("");
+                          setPrint2Font("Arial");
+                          setPrint2Side("back");
+                          setPrint2X(50);
+                          setPrint2Y(50);
+                          setPrint2Angle(0);
+                          setPrint2Scale(100);
+                          setPrint2ScaleX(100);
+                          setPrint2ScaleY(100);
+                        },
+                        selectedPrint2Id,
+                      )
+                    ) : (
+                      <Alert type="info" showIcon message="Нет доступных принтов" />
+                    )}
+                    <Card size="small" title="Управление принтом 2" style={{ marginTop: 8 }}>
+                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                        <Select
+                          value={print2Side}
+                          onChange={(v) => { setPrint2Side(v as "front" | "back"); setPreviewSide(v as "front" | "back"); }}
+                          style={{ width: 220 }}
+                          options={PRINT_SIDES}
+                        />
+                        <Alert type="info" showIcon message="Тяните оранжевую рамку принта 2" description="Оранжевая рамка — принт 2. Нижний правый маркер меняет размер, верхний крутит." />
+                        <Button onClick={() => { setPrint2X(50); setPrint2Y(50); setPrint2Angle(0); setPrint2Scale(100); setPrint2ScaleX(100); setPrint2ScaleY(100); }}>
+                          Сбросить размещение
+                        </Button>
+                        {selectedPrint2Id && (
+                          <Button danger onClick={() => setSelectedPrint2Id(undefined)}>
+                            Убрать принт 2
+                          </Button>
+                        )}
+                      </Space>
+                      {isTextPrint(selectedPrint2) ? (
+                        <div style={{ marginTop: 12 }}>
+                          <Space direction="vertical" style={{ width: "100%" }}>
+                            <Input placeholder="Текст на принте 2" value={print2Text} onChange={(e) => setPrint2Text(e.target.value)} />
+                            <Select value={print2Font} onChange={(value) => setPrint2Font(value)} options={CUSTOM_TEXT_FONTS} style={{ width: "100%" }} />
+                          </Space>
+                        </div>
+                      ) : null}
+                    </Card>
+                  </>)}
                 </Space>
               ) : null}
 
@@ -640,8 +756,35 @@ export default function ClientHome() {
                         </Form.Item>
                       </Col>
                       <Col xs={24} md={8}>
-                        <Form.Item name="promo_code" label="Промокод (необязательно)">
-                          <Input placeholder="Введите промокод" />
+                        <Form.Item
+                          name="promo_code"
+                          label="Промокод (необязательно)"
+                          validateStatus={promoStatus === "valid" ? "success" : promoStatus === "invalid" ? "error" : promoStatus === "checking" ? "validating" : ""}
+                          help={
+                            promoStatus === "valid"
+                              ? `Промокод применён${promoDescription ? ` · ${promoDescription}` : ""}`
+                              : promoStatus === "invalid"
+                              ? "Промокод не найден или неактивен"
+                              : undefined
+                          }
+                        >
+                          <Input
+                            placeholder="Введите промокод"
+                            onBlur={async (e) => {
+                              const code = e.target.value.trim();
+                              if (!code) { setPromoStatus("idle"); setPromoDescription(null); return; }
+                              setPromoStatus("checking");
+                              try {
+                                const res = await api.get(`/promo-codes/validate?code=${encodeURIComponent(code.toUpperCase())}`);
+                                setPromoStatus("valid");
+                                setPromoDescription(res.data.description ?? null);
+                              } catch {
+                                setPromoStatus("invalid");
+                                setPromoDescription(null);
+                              }
+                            }}
+                            onChange={() => { if (promoStatus !== "idle") setPromoStatus("idle"); }}
+                          />
                         </Form.Item>
                       </Col>
                       <Col xs={24} md={8}>

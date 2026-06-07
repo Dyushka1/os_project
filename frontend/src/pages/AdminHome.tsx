@@ -47,6 +47,7 @@ const adminActions: AdminAction[] = [
   { key: "continue", label: "Продолжить смену", path: "/admin/session-ops", ready: true },
   { key: "delete-all-orders", label: "Удалить все заказы", path: "/admin/session-ops", ready: true },
   { key: "branding", label: "Брендирование", path: "/admin/branding", ready: true },
+  { key: "promo-codes", label: "Промокоды", path: "/admin/promo-codes", ready: true },
 ];
 
 export default function AdminHome() {

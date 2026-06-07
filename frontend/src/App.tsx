@@ -14,6 +14,7 @@ import CatalogAdmin from "./pages/CatalogAdminDb";
 import StatsAdmin from "./pages/StatsAdmin";
 import AdminSessionOps from "./pages/AdminSessionOps";
 import BrandingAdmin from "./pages/BrandingAdmin";
+import AdminPromoCodes from "./pages/AdminPromoCodes";
 import ReceptionDesk from "./pages/ReceptionDesk";
 import MasterPrint from "./pages/MasterPrint";
 import MasterPrintTask from "./pages/MasterPrintTask";
@@ -48,6 +49,7 @@ export default function App() {
       <Route path="/admin/stats" element={<StatsAdmin />} />
       <Route path="/admin/session-ops" element={<AdminSessionOps />} />
       <Route path="/admin/branding" element={<BrandingAdmin />} />
+      <Route path="/admin/promo-codes" element={<AdminPromoCodes />} />
       <Route path="/reception" element={<ReceptionDesk />} />
       <Route path="/master/print" element={<MasterPrint />} />
       <Route path="/master/print/task" element={<MasterPrintTask />} />

@@ -35,6 +35,17 @@ type PrintMasterTaskRead = {
   print_scale: number | null;
   print_text: string | null;
   print_font: string | null;
+  print2_id: number | null;
+  print2_name: string | null;
+  print2_type: string | null;
+  print2_image_url: string | null;
+  print2_text: string | null;
+  print2_font: string | null;
+  print2_side: string | null;
+  print2_x: number | null;
+  print2_y: number | null;
+  print2_angle: number | null;
+  print2_scale: number | null;
   front_image_url?: string | null;
   back_image_url?: string | null;
 };
@@ -205,7 +216,7 @@ export default function MasterPrinting() {
 
               {/* Print info */}
               {(activeTask.print_name || activeTask.print_text) && (
-                <Card title="Принт" style={{ borderColor: "#722ed1", borderWidth: 2 }}>
+                <Card title="Принт 1" style={{ borderColor: "#722ed1", borderWidth: 2 }}>
                   <Descriptions column={1} size="small" bordered>
                     {activeTask.print_name && (
                       <Descriptions.Item label="Название">
@@ -235,6 +246,58 @@ export default function MasterPrinting() {
                       <img
                         src={resolveApiUrl(activeTask.print_image_url) ?? undefined}
                         alt="Принт"
+                        style={{ maxWidth: 200, maxHeight: 200 }}
+                      />
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Print 2 info */}
+              {(activeTask.print2_name || activeTask.print2_text) && (
+                <Card title="Принт 2" style={{ borderColor: "#fa8c16", borderWidth: 2 }}>
+                  <Descriptions column={1} size="small" bordered>
+                    {activeTask.print2_name && (
+                      <Descriptions.Item label="Название">
+                        <Text strong>{activeTask.print2_name}</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_text && (
+                      <Descriptions.Item label="Текст надписи">
+                        <Text strong style={{ fontSize: 16 }}>{activeTask.print2_text}</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_font && (
+                      <Descriptions.Item label="Шрифт">
+                        <Text code>{activeTask.print2_font}</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_side && (
+                      <Descriptions.Item label="Сторона">
+                        <Text strong>{getSideName(activeTask.print2_side)}</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_x !== null && activeTask.print2_y !== null && (
+                      <Descriptions.Item label="Центр принта 2">
+                        <Text code>X: {activeTask.print2_x}%, Y: {activeTask.print2_y}%</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_angle !== null && (
+                      <Descriptions.Item label="Угол поворота">
+                        <Text code>{activeTask.print2_angle}°</Text>
+                      </Descriptions.Item>
+                    )}
+                    {activeTask.print2_scale !== null && (
+                      <Descriptions.Item label="Размер принта 2">
+                        <Text code>{activeTask.print2_scale}%</Text>
+                      </Descriptions.Item>
+                    )}
+                  </Descriptions>
+                  {activeTask.print2_image_url && (
+                    <div style={{ marginTop: 12, textAlign: "center" }}>
+                      <img
+                        src={resolveApiUrl(activeTask.print2_image_url) ?? undefined}
+                        alt="Принт 2"
                         style={{ maxWidth: 200, maxHeight: 200 }}
                       />
                     </div>
@@ -282,6 +345,14 @@ export default function MasterPrinting() {
                   printY={activeTask.print_y ?? undefined}
                   printAngle={activeTask.print_angle ?? undefined}
                   printScale={activeTask.print_scale ?? undefined}
+                  print2={activeTask.print2_id ? { name: activeTask.print2_name ?? undefined, print_type: activeTask.print2_type ?? undefined, image_url: activeTask.print2_image_url } : undefined}
+                  print2Text={activeTask.print2_text ?? undefined}
+                  print2Font={activeTask.print2_font ?? undefined}
+                  print2Side={activeTask.print2_side ?? undefined}
+                  print2X={activeTask.print2_x ?? undefined}
+                  print2Y={activeTask.print2_y ?? undefined}
+                  print2Angle={activeTask.print2_angle ?? undefined}
+                  print2Scale={activeTask.print2_scale ?? undefined}
                   editable={false}
                 />
               </div>
