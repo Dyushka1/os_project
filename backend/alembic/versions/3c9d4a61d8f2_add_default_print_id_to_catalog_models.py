@@ -1,7 +1,7 @@
 """add default_print_id to catalog models
 
 Revision ID: 3c9d4a61d8f2
-Revises: f322b6f9145f
+Revises: a7c3b9f21d10
 Create Date: 2026-05-25 00:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '3c9d4a61d8f2'
-down_revision: Union[str, Sequence[str], None] = 'f322b6f9145f'
+down_revision: Union[str, Sequence[str], None] = 'a7c3b9f21d10'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
