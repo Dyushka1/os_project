@@ -20,6 +20,8 @@ class OrderCreate(BaseModel):
     print_y: int | None = None
     print_angle: float | None = None
     print_scale: int | None = None
+    print_scale_x: int | None = None
+    print_scale_y: int | None = None
 
 
 class OrderRead(BaseModel):
@@ -57,7 +59,9 @@ class OrderRead(BaseModel):
     print_y: int | None = None
     print_angle: float | None = None
     print_scale: int | None = None
-    
+    print_scale_x: int | None = None
+    print_scale_y: int | None = None
+
     color_id: int | None = None
     model_id: int | None = None
     size_id: int | None = None
@@ -80,7 +84,9 @@ class OrderCatalogUpdate(BaseModel):
     print_y: int | None = None
     print_angle: float | None = None
     print_scale: int | None = None
-    
+    print_scale_x: int | None = None
+    print_scale_y: int | None = None
+
 class OrderCancelRequest(BaseModel):
     reason: str
 
@@ -122,9 +128,11 @@ class PrintMasterTaskRead(BaseModel):
     print_y: int | None = None
     print_angle: float | None = None
     print_scale: int | None = None
+    print_scale_x: int | None = None
+    print_scale_y: int | None = None
     print_text: str | None = None
     print_font: str | None = None
-    
+
     # Принт (из каталога)
     print_id: int | None = None
     print_name: str | None = None
@@ -164,6 +172,8 @@ class NanesenieMasterTaskRead(BaseModel):
     print_y: int | None = None
     print_angle: float | None = None
     print_scale: int | None = None
+    print_scale_x: int | None = None
+    print_scale_y: int | None = None
     print_width: int | None = None
     print_height: int | None = None
 

@@ -24,7 +24,7 @@ export type GarmentPreviewModel = { name?: string; front_image_url?: string | nu
 export type GarmentPreviewPrint = { name?: string; print_type?: string; image_url?: string | null };
 export type GarmentPreviewColor = { name?: string };
 export type GarmentPreviewSize = { code?: string };
-export type GarmentPreviewUpdate = { printX?: number; printY?: number; printSide?: string; printAngle?: number; printScale?: number };
+export type GarmentPreviewUpdate = { printX?: number; printY?: number; printSide?: string; printAngle?: number; printScale?: number; printScaleX?: number; printScaleY?: number };
 
 export function isTextPrint(print?: GarmentPreviewPrint | null) {
   return !!print && !!print.print_type && TEXT_PRINT_TYPES.has(print.print_type);
@@ -43,6 +43,8 @@ type Props = {
   printY?: number;
   printAngle?: number;
   printScale?: number;
+  printScaleX?: number;
+  printScaleY?: number;
   onUpdatePrint?: (update: GarmentPreviewUpdate) => void;
   onSideChange?: (side: "front" | "back") => void;
   editable?: boolean;
@@ -58,6 +60,8 @@ type InteractionState = {
   startCenterX: number;
   startCenterY: number;
   startScale: number;
+  startScaleX: number;
+  startScaleY: number;
   startAngle: number;
   startAngleToPointer: number;
   startDistanceX: number;
@@ -75,7 +79,7 @@ function normalizeAngle(angle: number) {
   return next;
 }
 
-function getPreviewMetrics(rect: DOMRect, scale: number, isText: boolean) {
+function getPreviewMetrics(rect: DOMRect, scaleX: number, scaleY: number, isText: boolean) {
   const zone = {
     left: rect.width * PRINT_ZONE_INSETS.left,
     top: rect.height * PRINT_ZONE_INSETS.top,
@@ -84,8 +88,8 @@ function getPreviewMetrics(rect: DOMRect, scale: number, isText: boolean) {
   };
 
   const ratios = isText ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
-  const boxWidth = Math.min(zone.width * 0.94, zone.width * ratios.width * scale);
-  const boxHeight = Math.min(zone.height * 0.94, zone.height * ratios.height * scale);
+  const boxWidth = Math.min(zone.width * 0.94, zone.width * ratios.width * scaleX);
+  const boxHeight = Math.min(zone.height * 0.94, zone.height * ratios.height * scaleY);
   const centerX = rect.width * 0.5;
   const centerY = rect.height * 0.5;
 
@@ -104,6 +108,10 @@ export default function GarmentPreview(props: Props) {
 
   const normalizedPrintScale = clamp(props.printScale ?? 100, 20, 250);
   const scaleFactor = normalizedPrintScale / 100;
+  const normalizedPrintScaleX = clamp(props.printScaleX ?? normalizedPrintScale, 20, 250);
+  const normalizedPrintScaleY = clamp(props.printScaleY ?? normalizedPrintScale, 20, 250);
+  const scaleFactorX = normalizedPrintScaleX / 100;
+  const scaleFactorY = normalizedPrintScaleY / 100;
   const hasCustomText = !!props.printText?.trim();
   const textPrint = isTextPrint(props.print) || hasCustomText;
   const printImageUrl = resolveApiUrl(props.print?.image_url);
@@ -129,7 +137,7 @@ export default function GarmentPreview(props: Props) {
     event.stopPropagation();
 
     const rect = previewRef.current.getBoundingClientRect();
-    const metrics = getPreviewMetrics(rect, scaleFactor, textPrint);
+    const metrics = getPreviewMetrics(rect, scaleFactorX, scaleFactorY, textPrint);
     const pointerX = event.clientX - rect.left;
     const pointerY = event.clientY - rect.top;
     const centerX = rect.width * ((props.printX ?? 50) / 100);
@@ -143,6 +151,8 @@ export default function GarmentPreview(props: Props) {
       startCenterX: centerX,
       startCenterY: centerY,
       startScale: normalizedPrintScale,
+      startScaleX: normalizedPrintScaleX,
+      startScaleY: normalizedPrintScaleY,
       startAngle: props.printAngle ?? 0,
       startAngleToPointer: Math.atan2(pointerY - centerY, pointerX - centerX),
       startDistanceX: metrics.boxWidth / 2,
@@ -170,7 +180,7 @@ export default function GarmentPreview(props: Props) {
     const rect = previewRef.current.getBoundingClientRect();
     const pointerX = event.clientX - rect.left;
     const pointerY = event.clientY - rect.top;
-    const metrics = getPreviewMetrics(rect, scaleFactor, textPrint);
+    const metrics = getPreviewMetrics(rect, scaleFactorX, scaleFactorY, textPrint);
     const zoneLeft = metrics.zone.left;
     const zoneTop = metrics.zone.top;
     const zoneRight = metrics.zone.left + metrics.zone.width;
@@ -200,8 +210,9 @@ export default function GarmentPreview(props: Props) {
       const distanceY = Math.max(Math.abs(pointerY - current.startCenterY), 1);
       const ratioX = distanceX / Math.max(current.startDistanceX, 1);
       const ratioY = distanceY / Math.max(current.startDistanceY, 1);
-      const nextScale = clamp(current.startScale * Math.max(ratioX, ratioY), 20, 250);
-      props.onUpdatePrint?.({ printScale: Math.round(nextScale) });
+      const nextScaleX = clamp(current.startScaleX * ratioX, 20, 250);
+      const nextScaleY = clamp(current.startScaleY * ratioY, 20, 250);
+      props.onUpdatePrint?.({ printScaleX: Math.round(nextScaleX), printScaleY: Math.round(nextScaleY) });
       return;
     }
 
@@ -237,8 +248,8 @@ export default function GarmentPreview(props: Props) {
   const baseBox = textPrint ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
   const zoneWidthPercent = (1 - PRINT_ZONE_INSETS.left - PRINT_ZONE_INSETS.right) * 100;
   const zoneHeightPercent = (1 - PRINT_ZONE_INSETS.top - PRINT_ZONE_INSETS.bottom) * 100;
-  const boxWidthPercent = Math.min(zoneWidthPercent * 0.94, Math.max(zoneWidthPercent * 0.2, zoneWidthPercent * baseBox.width * scaleFactor));
-  const boxHeightPercent = Math.min(zoneHeightPercent * 0.94, Math.max(zoneHeightPercent * 0.2, zoneHeightPercent * baseBox.height * scaleFactor));
+  const boxWidthPercent = Math.min(zoneWidthPercent * 0.94, Math.max(zoneWidthPercent * 0.2, zoneWidthPercent * baseBox.width * scaleFactorX));
+  const boxHeightPercent = Math.min(zoneHeightPercent * 0.94, Math.max(zoneHeightPercent * 0.2, zoneHeightPercent * baseBox.height * scaleFactorY));
   const printImageRotate = props.printAngle ?? 0;
 
   const swipeProgress = previewRef.current

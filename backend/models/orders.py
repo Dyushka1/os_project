@@ -101,5 +101,7 @@ class Order(Base):
     print_y = Column(Integer, nullable=True)
     print_angle = Column(Float, nullable=True)
     print_scale = Column(Integer, nullable=True)
-    
+    print_scale_x = Column(Integer, nullable=True)
+    print_scale_y = Column(Integer, nullable=True)
+
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)

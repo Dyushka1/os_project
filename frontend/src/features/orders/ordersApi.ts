@@ -32,6 +32,8 @@ export type CreateOrderPayload = {
   print_y?: number;
   print_angle?: number;
   print_scale?: number;
+  print_scale_x?: number;
+  print_scale_y?: number;
 };
 
 export async function createOrder(payload: CreateOrderPayload) {

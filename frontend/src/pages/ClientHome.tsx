@@ -130,6 +130,8 @@ export default function ClientHome() {
   const [printY, setPrintY] = useState<number>(50);
   const [printAngle, setPrintAngle] = useState<number>(0);
   const [printScale, setPrintScale] = useState<number>(100);
+  const [printScaleX, setPrintScaleX] = useState<number>(100);
+  const [printScaleY, setPrintScaleY] = useState<number>(100);
   const [printText, setPrintText] = useState<string>("");
   const [printFont, setPrintFont] = useState<string>("Arial");
 
@@ -340,6 +342,8 @@ export default function ClientHome() {
       print_y: printY,
       print_angle: printAngle,
       print_scale: printScale,
+      print_scale_x: printScaleX,
+      print_scale_y: printScaleY,
     };
 
     setConfirmPayload(payload);
@@ -401,11 +405,15 @@ export default function ClientHome() {
                 printY={printY}
                 printAngle={printAngle}
                 printScale={printScale}
+                printScaleX={printScaleX}
+                printScaleY={printScaleY}
                 onUpdatePrint={(u: GarmentPreviewUpdate) => {
                   if (typeof u.printX === "number") setPrintX(u.printX);
                   if (typeof u.printY === "number") setPrintY(u.printY);
                   if (typeof u.printAngle === "number") setPrintAngle(u.printAngle);
                   if (typeof u.printScale === "number") setPrintScale(u.printScale);
+                  if (typeof u.printScaleX === "number") setPrintScaleX(u.printScaleX);
+                  if (typeof u.printScaleY === "number") setPrintScaleY(u.printScaleY);
                   if (u.printSide && ["front", "back"].includes(String(u.printSide))) {
                     setPrintSide(u.printSide as "front" | "back");
                   }

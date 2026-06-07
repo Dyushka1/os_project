@@ -81,6 +81,8 @@ def _build_print_master_task(order: Order, db: Session) -> PrintMasterTaskRead:
         print_y=order.print_y,
         print_angle=order.print_angle,
         print_scale=order.print_scale,
+        print_scale_x=order.print_scale_x,
+        print_scale_y=order.print_scale_y,
         print_text=order.print_text,
         print_font=order.print_font,
         front_image_url=front_image_url,
@@ -148,6 +150,8 @@ def _build_nanesenie_master_task(order: Order, db: Session) -> NanesenieMasterTa
         print_y=order.print_y,
         print_angle=order.print_angle,
         print_scale=order.print_scale,
+        print_scale_x=order.print_scale_x,
+        print_scale_y=order.print_scale_y,
         print_width=print_width,
         print_height=print_height,
         front_image_url=front_image_url,
@@ -252,6 +256,8 @@ def serialize_order(order: Order, db: Session) -> dict:
         "print_y": order.print_y,
         "print_angle": order.print_angle,
         "print_scale": order.print_scale,
+        "print_scale_x": order.print_scale_x,
+        "print_scale_y": order.print_scale_y,
         "color_id": order.color_id,
         "model_id": order.model_id,
         "size_id": order.size_id,
@@ -614,7 +620,9 @@ def create_order(order: OrderCreate,
                       print_x=order.print_x,
                       print_y=order.print_y,
                       print_angle=order.print_angle,
-                      print_scale=order.print_scale,)
+                      print_scale=order.print_scale,
+                      print_scale_x=order.print_scale_x,
+                      print_scale_y=order.print_scale_y,)
     model_and_size.stock_qty -= 1
     db.add(new_order)
     db.flush()
@@ -810,6 +818,10 @@ def update_order_catalog(order_id: int,
         order.print_angle = data.print_angle
     if data.print_scale is not None:
         order.print_scale = data.print_scale
+    if data.print_scale_x is not None:
+        order.print_scale_x = data.print_scale_x
+    if data.print_scale_y is not None:
+        order.print_scale_y = data.print_scale_y
 
     log_order_event(db, order.id, "order_catalog_updated", user_id=current_user.id)
     commit_with_rollback(db)
