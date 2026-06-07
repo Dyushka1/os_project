@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Table, Input, Card } from "antd";
+import { Table, Input, Card, Button } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchOrders } from "./ordersApi";
@@ -17,7 +17,7 @@ export default function OrdersList() {
   });
 
   const columns = [
-    { title: "ID", dataIndex: "id", key: "id" },
+    { title: "№ заказа", dataIndex: "order_number", key: "order_number" },
     { title: "Status", dataIndex: "status", key: "status" },
     {
       title: "Client",
@@ -50,6 +50,13 @@ export default function OrdersList() {
           onClick: () => navigate(`/orders/${record.id}`),
         })}
       />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button type="primary" onClick={() => navigate("/orders/new")}>
+          Новый заказ
+        </Button>  
+        <Button onClick={() => navigate("/board")}>Табло</Button>
+        <Button onClick={() => navigate("/admin")}>На главный экран</Button>
+      </div>
     </Card>
   );
 }

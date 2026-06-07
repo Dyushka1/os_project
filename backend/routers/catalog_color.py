@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth import get_current_user, require_roles
+from auth import get_current_user_optional, get_current_user, require_roles
 from database import get_db
 from models.catalog_colors import CatalogColors
 from models.users import Role, User
@@ -22,13 +22,20 @@ def commit_with_rollback(db: Session) -> None:
         
         
 @router.get("/", response_model=list[CatalogColorRead])
-def list_colors(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    require_roles(current_user, [Role.ADMIN])
+def list_colors(db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
+    # public read access
     return db.query(CatalogColors).order_by(CatalogColors.id.asc()).all()
 
-@router.get("/{color_id}", response_model=CatalogColorRead)
-def get_color(color_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+
+@router.delete("/all")
+def delete_all_colors(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_roles(current_user, [Role.ADMIN])
+    deleted_count = db.query(CatalogColors).delete(synchronize_session=False)
+    commit_with_rollback(db)
+    return {"deleted_count": deleted_count}
+
+@router.get("/{color_id}", response_model=CatalogColorRead)
+def get_color(color_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
     color = db.query(CatalogColors).filter(CatalogColors.id == color_id).first()
     if color is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Color not found")

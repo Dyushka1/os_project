@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import uvicorn
+from pathlib import Path
 from routers import (
     orders,
     login,
@@ -15,6 +17,7 @@ from routers import (
     catalog_models,
     catalog_prints,
     catalog_model_sizes,
+    branding,
 )
 from database import Base, engine
 from models.orders import Order
@@ -33,6 +36,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -52,6 +57,11 @@ app.include_router(catalog_sizes.router)
 app.include_router(catalog_models.router)
 app.include_router(catalog_prints.router)
 app.include_router(catalog_model_sizes.router)
+app.include_router(branding.router)
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
 def root():

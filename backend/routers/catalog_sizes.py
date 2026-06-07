@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth import get_current_user, require_roles
+from auth import get_current_user_optional, get_current_user, require_roles
 from database import get_db
 from models.catalog_sizes import CatalogSize
 from models.users import Role, User
@@ -23,14 +23,21 @@ def commit_with_rollback(db: Session) -> None:
 
 
 @router.get("/", response_model=list[CatalogSizeRead])
-def list_sizes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    require_roles(current_user, [Role.ADMIN])
+def list_sizes(db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
+    # public read access
     return db.query(CatalogSize).order_by(CatalogSize.sort_order.asc(), CatalogSize.id.asc()).all()
 
 
-@router.get("/{size_id}", response_model=CatalogSizeRead)
-def get_size(size_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+@router.delete("/all")
+def delete_all_sizes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_roles(current_user, [Role.ADMIN])
+    deleted_count = db.query(CatalogSize).delete(synchronize_session=False)
+    commit_with_rollback(db)
+    return {"deleted_count": deleted_count}
+
+
+@router.get("/{size_id}", response_model=CatalogSizeRead)
+def get_size(size_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
     size = db.query(CatalogSize).filter(CatalogSize.id == size_id).first()
     if size is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Size not found")

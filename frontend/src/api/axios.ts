@@ -21,9 +21,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      localStorage.removeItem("token");
-      // редирект на login
-      window.location.href = "/login";
+      const token = localStorage.getItem("token");
+      const requestUrl = String(error?.config?.url || "");
+      const isAuthRequest = requestUrl.includes("/login/") || requestUrl.includes("/users/register");
+
+      if (token && !isAuthRequest) {
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }
