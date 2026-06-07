@@ -17,11 +17,11 @@ class OrderStatus(enum.Enum):
 
 STATUS_TRANSITIONS = {
     OrderStatus.NEW.value: [OrderStatus.CONFIRMED.value, OrderStatus.CANCEL_REQUESTED.value],
-    OrderStatus.CONFIRMED.value: [OrderStatus.PRINTING.value, OrderStatus.CANCEL_REQUESTED.value],
-    OrderStatus.PRINTING.value: [OrderStatus.PRINTED.value, OrderStatus.CANCEL_REQUESTED.value],
-    OrderStatus.PRINTED.value: [OrderStatus.NANESENIE.value, OrderStatus.CANCEL_REQUESTED.value],
+    OrderStatus.CONFIRMED.value: [OrderStatus.NANESENIE.value, OrderStatus.PRINTING.value, OrderStatus.CANCEL_REQUESTED.value],
     OrderStatus.NANESENIE.value: [OrderStatus.NANESENIE_DONE.value, OrderStatus.CANCEL_REQUESTED.value],
-    OrderStatus.NANESENIE_DONE.value: [OrderStatus.DELIVERING.value, OrderStatus.CANCEL_REQUESTED.value],
+    OrderStatus.NANESENIE_DONE.value: [OrderStatus.PRINTING.value, OrderStatus.CANCEL_REQUESTED.value],
+    OrderStatus.PRINTING.value: [OrderStatus.PRINTED.value, OrderStatus.CANCEL_REQUESTED.value],
+    OrderStatus.PRINTED.value: [OrderStatus.DELIVERING.value, OrderStatus.CANCEL_REQUESTED.value],
     OrderStatus.DELIVERING.value: [OrderStatus.ISSUED.value, OrderStatus.CANCEL_REQUESTED.value],
     OrderStatus.ISSUED.value: [],
     OrderStatus.CANCEL_REQUESTED.value: [OrderStatus.CANCELED.value],
@@ -100,5 +100,6 @@ class Order(Base):
     print_x = Column(Integer, nullable=True)
     print_y = Column(Integer, nullable=True)
     print_angle = Column(Float, nullable=True)
+    print_scale = Column(Integer, nullable=True)
     
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)

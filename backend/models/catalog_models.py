@@ -11,4 +11,5 @@ class CatalogModel(Base):
     color_id = Column(Integer, ForeignKey("catalog_colors.id"), nullable=False, index=True)
     front_image_url = Column(String, nullable=True)
     back_image_url = Column(String, nullable=True)
+    default_print_id = Column(Integer, ForeignKey("catalog_prints.id"), nullable=True, index=True)
     is_active = Column(Boolean, default=True, index=True)

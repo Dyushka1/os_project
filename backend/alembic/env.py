@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 import models.orders, models.clients, models.delivery, models.print_job, models.sessions, models.order_events
 import models.catalog_colors, models.catalog_models, models.catalog_sizes, models.catalog_model_sizes, models.catalog_prints
+import models.branding_assets
 from alembic import context
 
 # this is the Alembic Config object, which provides

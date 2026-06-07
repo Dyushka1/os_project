@@ -37,6 +37,11 @@ pip-wheel-metadata/
 .env
 .env.*
 !.env.example
+!.env.docker
+
+# --- Static uploads ---
+static/*
+!static/.gitkeep
 
 # --- Local databases / dumps ---
 *.sqlite

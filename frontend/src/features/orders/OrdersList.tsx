@@ -17,7 +17,7 @@ export default function OrdersList() {
   });
 
   const columns = [
-    { title: "ID", dataIndex: "id", key: "id" },
+    { title: "№ заказа", dataIndex: "order_number", key: "order_number" },
     { title: "Status", dataIndex: "status", key: "status" },
     {
       title: "Client",
@@ -50,9 +50,13 @@ export default function OrdersList() {
           onClick: () => navigate(`/orders/${record.id}`),
         })}
       />
-      <Button type="primary" onClick={() => navigate("/orders/new")}>
-        Новый заказ
-      </Button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button type="primary" onClick={() => navigate("/orders/new")}>
+          Новый заказ
+        </Button>  
+        <Button onClick={() => navigate("/board")}>Табло</Button>
+        <Button onClick={() => navigate("/admin")}>На главный экран</Button>
+      </div>
     </Card>
   );
 }

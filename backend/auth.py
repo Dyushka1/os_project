@@ -9,6 +9,7 @@ from fastapi import Depends
 from models.sessions import SessionModel
 from database import get_db
 import os
+import re
 from dotenv import load_dotenv
 
 
@@ -20,6 +21,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+PHONE_REGEX = re.compile(r"^\+?\d{10,15}$")
 
 def hash_password(password: str) -> str:
     password_bytes = password.encode('utf-8')
@@ -42,7 +44,16 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 def get_user_by_username(db: Session, username: str) -> User | None:
-    return db.query(User).filter(User.username == username).first()
+    username_normalized = username.strip()
+    user = db.query(User).filter(User.username == username_normalized).first()
+    if user is not None:
+        return user
+
+    if PHONE_REGEX.fullmatch(username_normalized):
+        alternate = username_normalized[1:] if username_normalized.startswith("+") else f"+{username_normalized}"
+        return db.query(User).filter(User.username == alternate).first()
+
+    return None
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
     user = get_user_by_username(db, username)
@@ -56,9 +67,11 @@ from fastapi import Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jwt import PyJWTError
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> User:
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(security), db: Session = Depends(get_db)) -> User:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -70,6 +83,25 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     user = get_user_by_username(db, username)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+
+def get_current_user_optional(credentials: HTTPAuthorizationCredentials | None = Depends(security), db: Session = Depends(get_db)) -> User | None:
+    """Try to get current user from Authorization header. If no valid credentials present, return None instead of raising.
+
+    Useful for endpoints that allow anonymous access but still accept authenticated requests.
+    """
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+    except PyJWTError:
+        return None
+
+    user = get_user_by_username(db, username)
     return user
 
 from fastapi import HTTPException, status

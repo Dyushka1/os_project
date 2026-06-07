@@ -1,8 +1,6 @@
 import axios from "axios";
 
-const envBaseURL = ((import.meta.env.VITE_API_BASE_URL as string) || "").trim();
-const baseURL = envBaseURL || "http://127.0.0.1:8000";
-const isNgrokBase = baseURL.includes("ngrok-free.dev") || baseURL.includes("ngrok.app");
+const baseURL = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";
 
 const api = axios.create({
   baseURL,
@@ -12,9 +10,6 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  if (isNgrokBase && config.headers) {
-    config.headers["ngrok-skip-browser-warning"] = "true";
-  }
   const token = localStorage.getItem("token");
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -26,9 +21,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      localStorage.removeItem("token");
-      // редирект на login
-      window.location.href = "/login";
+      const token = localStorage.getItem("token");
+      const requestUrl = String(error?.config?.url || "");
+      const isAuthRequest = requestUrl.includes("/login/") || requestUrl.includes("/users/register");
+
+      if (token && !isAuthRequest) {
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

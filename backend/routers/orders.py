@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
-from auth import get_current_user, require_active_session, require_roles
+from auth import get_current_user, get_current_user_optional, require_active_session, require_roles
 from models.users import User, Role
-from schemas.orders import OrderCreate, OrderRead, OrderUpdate, OrderCatalogUpdate, OrderCancelRequest
-from schemas.clients import ClientCreate
+from schemas.orders import (
+    OrderCreate, OrderRead, OrderUpdate, OrderCatalogUpdate, OrderCancelRequest,
+    PrintMasterTaskRead, NanesenieMasterTaskRead
+)
+from schemas.clients import ClientCreate, ClientRead
 from database import get_db
 from models.clients import Client
 from models.orders import Order, OrderStatus, validate_status_transition, validate_cancel_request, validate_cancel_approve
@@ -13,12 +16,150 @@ from models.catalog_models import CatalogModel
 from models.catalog_sizes import CatalogSize
 from models.catalog_prints import CatalogPrint
 from models.catalog_colors import CatalogColors
+from models.sessions import SessionModel
 from datetime import datetime, timezone
-from models.order_events import OrderEvent
+from models.order_events import OrderEvent 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 TEXT_PRINT_TYPES = {"text", "custom_text", "own_text", "own-text"}
-ALLOWED_PRINT_SIDES = {"front", "back", "left", "right"}
+ALLOWED_PRINT_SIDES = {"front", "back"}
+ALLOWED_NOTIFY_METHODS = {"sms", "email", "whatsapp", "viber", "telegram", "none"}
+
+
+# ==================== Helper functions to convert Order to Master task schemas ====================
+
+def _build_print_master_task(order: Order, db: Session) -> PrintMasterTaskRead:
+    """Convert an Order to PrintMasterTaskRead with resolved catalog names."""
+    model_name = None
+    size_code = None
+    color_name = None
+    front_image_url = None
+    back_image_url = None
+    print_name = None
+    print_type = None
+    print_image_url = None
+
+    if order.model_id:
+        model = db.query(CatalogModel).filter(CatalogModel.id == order.model_id).first()
+        if model:
+            model_name = model.name
+            front_image_url = model.front_image_url
+            back_image_url = model.back_image_url
+
+    if order.size_id:
+        size = db.query(CatalogSize).filter(CatalogSize.id == order.size_id).first()
+        if size:
+            size_code = size.code
+
+    if order.color_id:
+        color = db.query(CatalogColors).filter(CatalogColors.id == order.color_id).first()
+        if color:
+            color_name = color.name
+
+    if order.print_id:
+        catalog_print = db.query(CatalogPrint).filter(CatalogPrint.id == order.print_id).first()
+        if catalog_print:
+            print_name = catalog_print.name
+            print_type = catalog_print.print_type
+            print_image_url = catalog_print.image_url
+    elif order.print_text:
+        print_type = "custom_text"
+
+    return PrintMasterTaskRead(
+        id=order.id,
+        order_id=order.id,
+        order_number=get_session_order_number(db, order),
+        model_name=model_name,
+        size_code=size_code,
+        color_name=color_name,
+        print_id=order.print_id,
+        print_name=print_name,
+        print_type=print_type,
+        print_image_url=print_image_url,
+        print_side=order.print_side,
+        print_x=order.print_x,
+        print_y=order.print_y,
+        print_angle=order.print_angle,
+        print_scale=order.print_scale,
+        print_text=order.print_text,
+        print_font=order.print_font,
+        front_image_url=front_image_url,
+        back_image_url=back_image_url,
+    )
+
+
+def _build_nanesenie_master_task(order: Order, db: Session) -> NanesenieMasterTaskRead:
+    """Convert an Order to NanesenieMasterTaskRead with resolved catalog names."""
+    model_name = None
+    size_code = None
+    color_name = None
+    print_name = None
+    print_type = None
+    print_image_url = None
+    front_image_url = None
+    back_image_url = None
+
+    if order.model_id:
+        model = db.query(CatalogModel).filter(CatalogModel.id == order.model_id).first()
+        if model:
+            model_name = model.name
+            front_image_url = model.front_image_url
+            back_image_url = model.back_image_url
+
+    if order.size_id:
+        size = db.query(CatalogSize).filter(CatalogSize.id == order.size_id).first()
+        if size:
+            size_code = size.code
+
+    if order.color_id:
+        color = db.query(CatalogColors).filter(CatalogColors.id == order.color_id).first()
+        if color:
+            color_name = color.name
+
+    print_width = None
+    print_height = None
+
+    if order.print_id:
+        catalog_print = db.query(CatalogPrint).filter(CatalogPrint.id == order.print_id).first()
+        if catalog_print:
+            print_name = catalog_print.name
+            print_type = catalog_print.print_type
+            print_image_url = catalog_print.image_url
+            print_width = catalog_print.width
+            print_height = catalog_print.height
+    elif order.print_text:
+        print_type = "custom_text"
+
+    return NanesenieMasterTaskRead(
+        id=order.id,
+        order_id=order.id,
+        order_number=get_session_order_number(db, order),
+        model_name=model_name,
+        size_code=size_code,
+        color_name=color_name,
+        print_id=order.print_id,
+        print_name=print_name,
+        print_type=print_type,
+        print_image_url=print_image_url,
+        print_text=order.print_text,
+        print_font=order.print_font,
+        print_side=order.print_side,
+        print_x=order.print_x,
+        print_y=order.print_y,
+        print_angle=order.print_angle,
+        print_scale=order.print_scale,
+        print_width=print_width,
+        print_height=print_height,
+        front_image_url=front_image_url,
+        back_image_url=back_image_url,
+    )
+
+
+
+
+
+def get_user_client_marker(user_id: int) -> str:
+    return f"user:{user_id}"
 
 
 def commit_with_rollback(db: Session) -> None:
@@ -55,6 +196,70 @@ def clear_cancel_request_fields(order: Order) -> None:
     order.cancel_requested_by_user_id = None
 
 
+def get_order_session(db: Session, order: Order) -> SessionModel:
+    if order.session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order has no session attached",
+        )
+    session = db.query(SessionModel).filter(SessionModel.id == order.session_id).first()
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session for order not found",
+        )
+    return session
+
+
+def get_session_order_number(db: Session, order: Order) -> int | None:
+    if order.session_id is None:
+        return None
+    return db.query(Order).filter(Order.session_id == order.session_id, Order.id <= order.id).count()
+
+
+def serialize_order(order: Order, db: Session) -> dict:
+    client = None
+    if order.client_id is not None:
+        client_obj = db.query(Client).filter(Client.id == order.client_id).first()
+        if client_obj is not None:
+          client = ClientRead.model_validate(client_obj).model_dump()
+
+    return {
+        "id": order.id,
+        "order_number": get_session_order_number(db, order),
+        "client_id": order.client_id,
+        "client": client,
+        "status": order.status,
+        "print_master_id": order.print_master_id,
+        "nanesenie_master_id": order.nanesenie_master_id,
+        "issue_master_id": order.issue_master_id,
+        "cancel_reason": order.cancel_reason,
+        "cancel_requested_by_user_id": order.cancel_requested_by_user_id,
+        "cancel_requested_at": order.cancel_requested_at,
+        "canceled_by_user_id": order.canceled_by_user_id,
+        "canceled_at": order.canceled_at,
+        "time_confirmed": order.time_confirmed,
+        "time_print_started": order.time_print_started,
+        "time_print_finished": order.time_print_finished,
+        "time_issued": order.time_issued,
+        "promo_code": order.promo_code,
+        "notify_method": order.notify_method,
+        "notify_contact": order.notify_contact,
+        "print_text": order.print_text,
+        "print_font": order.print_font,
+        "print_side": order.print_side,
+        "print_x": order.print_x,
+        "print_y": order.print_y,
+        "print_angle": order.print_angle,
+        "print_scale": order.print_scale,
+        "color_id": order.color_id,
+        "model_id": order.model_id,
+        "size_id": order.size_id,
+        "print_id": order.print_id,
+        "session_id": order.session_id,
+    }
+
+
 def validate_print_payload(
     print_type: str | None,
     print_text: str | None,
@@ -63,6 +268,7 @@ def validate_print_payload(
     print_x: int | None,
     print_y: int | None,
     print_angle: float | None,
+    print_scale: int | None,
 ) -> None:
     if (print_x is None) != (print_y is None):
         raise HTTPException(
@@ -87,7 +293,12 @@ def validate_print_payload(
     if print_side is not None and print_side not in ALLOWED_PRINT_SIDES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="print_side must be one of: front, back, left, right",
+            detail="print_side must be one of: front, back",
+        )
+    if print_scale is not None and (print_scale < 20 or print_scale > 250):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="print_scale must be between 20 and 250",
         )
     if bool(print_text) != bool(print_font):
         raise HTTPException(
@@ -99,10 +310,52 @@ def validate_print_payload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Text print requires print_text",
         )
+
+
+def validate_phone_payload(phone: str | None) -> None:
+    if not phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="client.phone is required when creating client inline",
+        )
+    if any(char.isalpha() for char in phone):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="client.phone must contain only digits and symbols +()-",
+        )
+    digits = "".join(char for char in phone if char.isdigit())
+    if len(digits) < 10 or len(digits) > 15:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="client.phone must contain between 10 and 15 digits",
+        )
+
+
+def validate_notify_payload(notify_method: str | None, notify_contact: str | None) -> None:
+    if notify_method is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="notify_method is required",
+        )
+    if notify_method not in ALLOWED_NOTIFY_METHODS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="notify_method must be one of: sms, email, whatsapp, viber, telegram, none",
+        )
+    if notify_method != "none" and not (notify_contact and notify_contact.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="notify_contact is required when notify_method is not none",
+        )
     
     
 def get_or_create_client(db: Session, client_data: ClientCreate) -> int:
-    client = db.query(Client).filter_by(phone=client_data.phone).first()
+    client = None
+    if client_data.phone:
+        client = db.query(Client).filter_by(phone=client_data.phone).first()
+    elif client_data.email:
+        client = db.query(Client).filter_by(email=client_data.email).first()
+
     if not client:
         client = Client(
             name=client_data.name,
@@ -143,7 +396,7 @@ def search_orders(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    require_roles(current_user, [Role.ADMIN, Role.RECEPTION, Role.ISSUE])
+    require_roles(current_user, [Role.ADMIN, Role.RECEPTION, Role.ISSUE, Role.PRINT, Role.NANESENIE])
 
     query = db.query(Order).outerjoin(Client, Client.id == Order.client_id)
 
@@ -152,7 +405,21 @@ def search_orders(
         if q_value:
             filters = []
             if q_value.isdigit():
-                filters.append(Order.id == int(q_value))
+                n = int(q_value)
+                active_session = db.query(SessionModel).filter(SessionModel.is_active == True).first()
+                if active_session:
+                    target_id = (
+                        db.query(Order.id)
+                        .filter(Order.session_id == active_session.id)
+                        .order_by(Order.id)
+                        .offset(n - 1)
+                        .limit(1)
+                        .scalar()
+                    )
+                    if target_id is not None:
+                        filters.append(Order.id == target_id)
+                else:
+                    filters.append(Order.id == n)
 
             like_value = f"%{q_value}%"
             filters.append(Client.name.ilike(like_value))
@@ -164,7 +431,32 @@ def search_orders(
     if order_status is not None:
         query = query.filter(Order.status == order_status.value)
 
-    return query.order_by(Order.id.desc()).limit(limit).all()
+    return [serialize_order(order, db) for order in query.order_by(Order.id.desc()).limit(limit).all()]
+
+
+@router.get("/my", response_model=list[OrderRead])
+def get_my_orders(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.USER, Role.ADMIN])
+
+    if current_user.role == Role.ADMIN:
+        return [serialize_order(order, db) for order in db.query(Order).order_by(Order.id.desc()).limit(limit).all()]
+
+    client = db.query(Client).filter(Client.email == get_user_client_marker(current_user.id)).first()
+    if not client:
+        return []
+
+    orders = (
+        db.query(Order)
+        .filter(Order.client_id == client.id)
+        .order_by(Order.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [serialize_order(order, db) for order in orders]
         
 
 
@@ -172,37 +464,40 @@ def search_orders(
 def list_orders(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_roles(current_user, [Role.ADMIN, Role.USER])
     orders = db.query(Order).all()
-    return orders
+    return [serialize_order(order, db) for order in orders]
 
 @router.get("/{order_id}" , response_model=OrderRead)
 def get_order(order_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    require_roles(current_user, [Role.ADMIN, Role.USER])
+    require_roles(current_user, [Role.ADMIN, Role.USER, Role.RECEPTION, Role.ISSUE])
     order = db.query(Order).filter(Order.id== order_id).first()
     if order is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Order with id {order_id} not found",
         )
-    return order
+    return serialize_order(order, db)
 
 @router.post("/", response_model=OrderRead)
 def create_order(order: OrderCreate,
                  db: Session = Depends(get_db),
-                 current_user: User = Depends(get_current_user),
+                 current_user: User | None = Depends(get_current_user_optional),
                  session = Depends(require_active_session)
                  ):
-    require_roles(current_user, [Role.ADMIN, Role.RECEPTION])
-    
-    if order.client_id is None and order.client is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either client_id or client data must be provided",
-        )
-    if order.client_id is not None and order.client is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provide either client_id or client data, not both",
-        )
+    # Allow anonymous (kiosk) clients to create orders by providing inline client data.
+    is_client_user = (current_user is not None and current_user.role == Role.USER)
+
+    if not is_client_user:
+        # For non-client users (staff) or anonymous callers, require explicit client info
+        if order.client_id is None and order.client is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either client_id or client data must be provided",
+            )
+        if order.client_id is not None and order.client is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provide either client_id or client data, not both",
+            )
     
     model = db.query(CatalogModel).filter(CatalogModel.id == order.model_id).first()
     if not model:
@@ -260,6 +555,11 @@ def create_order(order: OrderCreate,
             )
 
     selected_print_type = catalog_print.print_type if order.print_id is not None else None
+    validate_notify_payload(order.notify_method, order.notify_contact)
+
+    if order.client is not None:
+        validate_phone_payload(order.client.phone)
+
     validate_print_payload(
         print_type=selected_print_type,
         print_text=order.print_text,
@@ -268,6 +568,7 @@ def create_order(order: OrderCreate,
         print_x=order.print_x,
         print_y=order.print_y,
         print_angle=order.print_angle,
+        print_scale=order.print_scale,
     )
 
     resolved_color_id = order.color_id if order.color_id is not None else model.color_id
@@ -288,7 +589,15 @@ def create_order(order: OrderCreate,
             detail="Selected color is inactive",
         )
 
-    client_id = resolve_client_id(db, order.client_id, order.client)
+    if is_client_user:
+        client_payload = ClientCreate(
+            name=(order.client.name if order.client and order.client.name else current_user.username),
+            phone=(order.client.phone if order.client else None),
+            email=get_user_client_marker(current_user.id),
+        )
+        client_id = get_or_create_client(db, client_payload)
+    else:
+        client_id = resolve_client_id(db, order.client_id, order.client)
     new_order = Order(client_id = client_id,
                       status=OrderStatus.NEW.value,
                       session_id=session.id,
@@ -304,14 +613,15 @@ def create_order(order: OrderCreate,
                       print_side=order.print_side,
                       print_x=order.print_x,
                       print_y=order.print_y,
-                      print_angle=order.print_angle,)
+                      print_angle=order.print_angle,
+                      print_scale=order.print_scale,)
     model_and_size.stock_qty -= 1
     db.add(new_order)
     db.flush()
-    log_order_event(db, new_order.id, "order_created", user_id=current_user.id)
+    log_order_event(db, new_order.id, "order_created", user_id=(current_user.id if current_user is not None else None))
     commit_with_rollback(db)
     db.refresh(new_order)
-    return new_order
+    return serialize_order(new_order, db)
 
 
 @router.put("/{order_id}", response_model=OrderRead)
@@ -336,7 +646,7 @@ def update_order(order_id: int,
         
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
 
 @router.put("/{order_id}/catalog", response_model=OrderRead)
 def update_order_catalog(order_id: int,
@@ -441,6 +751,7 @@ def update_order_catalog(order_id: int,
     new_print_x = data.print_x if data.print_x is not None else order.print_x
     new_print_y = data.print_y if data.print_y is not None else order.print_y
     new_print_angle = data.print_angle if data.print_angle is not None else order.print_angle
+    new_print_scale = data.print_scale if data.print_scale is not None else order.print_scale
 
     validate_print_payload(
         print_type=selected_print.print_type if selected_print is not None else None,
@@ -450,6 +761,7 @@ def update_order_catalog(order_id: int,
         print_x=new_print_x,
         print_y=new_print_y,
         print_angle=new_print_angle,
+        print_scale=new_print_scale,
     )
 
     old_model_size = (
@@ -496,15 +808,36 @@ def update_order_catalog(order_id: int,
         order.print_y = data.print_y
     if data.print_angle is not None:
         order.print_angle = data.print_angle
+    if data.print_scale is not None:
+        order.print_scale = data.print_scale
 
     log_order_event(db, order.id, "order_catalog_updated", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
     
     
                         
                             
+
+# DEPRECATED ENDPOINTS: These were used before refactoring the workflow order
+# The correct workflow is now:
+# 1. After order confirmation → goes to NANESENIE (if session has prints to make) or PRINTING (if using pre-made prints)
+# 2. NANESENIE stage: Nanesenie master makes the print design
+# 3. PRINTING stage: Print master applies the print to the garment
+# The endpoints below should not be used. Use /next/nanesenie and /next/printing instead
+
+
+# @router.post("/{order_id}/take_print", response_model=OrderRead)
+# def take_print(
+#     order_id: int,
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user),
+#     session = Depends(require_active_session),
+#     ):
+#     DEPRECATED - use /next/nanesenie instead
+
+
 @router.post("/{order_id}/take_print", response_model=OrderRead)
 def take_print(
     order_id: int,
@@ -553,114 +886,12 @@ def take_print(
     order.time_print_started = datetime.now(timezone.utc)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
     
 
-@router.post("/next/print", response_model=OrderRead)
-def get_next_print_order(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    require_roles(current_user, [Role.ADMIN, Role.PRINT])
-
-    if current_user.role == Role.PRINT:
-        active_order = (
-            db.query(Order)
-            .filter(
-                Order.print_master_id == current_user.id,
-                Order.status == OrderStatus.PRINTING.value,
-            )
-            .first()
-        )
-        if active_order:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You already have an active print order",
-            )
-
-    order = (
-        db.query(Order)
-        .filter(
-            Order.print_master_id.is_(None),
-            Order.status == OrderStatus.CONFIRMED.value,
-        )
-        .order_by(Order.id.asc())
-        .first()
-    )
-
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Print queue is empty",
-        )
-
-    order.print_master_id = current_user.id
-    order.status = OrderStatus.PRINTING.value
-    log_order_event(db, order.id, "print_started", user_id=current_user.id)
-    order.time_print_started = datetime.now(timezone.utc)
-    commit_with_rollback(db)
-    db.refresh(order)
-    return order
-
-
-@router.get("/queue/print", response_model=list[OrderRead])
-def get_print_queue(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    require_roles(current_user, [Role.ADMIN, Role.PRINT, Role.RECEPTION])
-
-    queue = (
-        db.query(Order)
-        .filter(
-            Order.print_master_id.is_(None),
-            Order.status == OrderStatus.CONFIRMED.value,
-        )
-        .order_by(Order.id.asc())
-        .all()
-    )
-    return queue
-
-@router.post("/{order_id}/finish_print", response_model=OrderRead)
-def finish_print(
-    order_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    session = Depends(require_active_session),
-    ):
-    require_roles(current_user, [Role.ADMIN, Role.PRINT])
     
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id {order_id} not found",
-        )
-    
-    if order.status != OrderStatus.PRINTING.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order is not currently being printed",
-        )
-    
-    if order.print_master_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not assigned to print this order",
-        )
-        
-    if current_user.role != Role.ADMIN and order.print_master_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the assigned print master or admin can finish this order",
-        )
-    
-    order.status = OrderStatus.PRINTED.value
-    log_order_event(db, order.id, "print_finished", user_id=current_user.id)
-    order.time_print_finished = datetime.now(timezone.utc)
-    commit_with_rollback(db)
-    db.refresh(order)
-    return order
+
+
 
 @router.post("/{order_id}/start_delivery", response_model=OrderRead)
 def start_delivery(
@@ -677,18 +908,18 @@ def start_delivery(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Order with id {order_id} not found",
         )
-    
-    if order.status != OrderStatus.NANESENIE_DONE.value:
+
+    if order.status not in (OrderStatus.PRINTED.value, OrderStatus.NANESENIE_DONE.value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order must finish nanesenie before delivery",
+            detail="Заказ должен быть напечатан или завершён на нанесении перед выдачей",
         )
     
     order.status = OrderStatus.DELIVERING.value
     log_order_event(db, order.id, "delivery_started", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
 
 @router.post("/{order_id}/issue", response_model=OrderRead)
 def issue_order(
@@ -720,7 +951,27 @@ def issue_order(
     order.time_issued = datetime.now(timezone.utc)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
+
+
+@router.get("/queue/issue", response_model=list[OrderRead])
+def get_issue_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.ISSUE, Role.RECEPTION])
+    ready_statuses = [
+        OrderStatus.PRINTED.value,
+        OrderStatus.DELIVERING.value,
+    ]
+    orders = (
+        db.query(Order)
+        .filter(Order.status.in_(ready_statuses))
+        .order_by(Order.id.asc())
+        .all()
+    )
+    return [serialize_order(o, db) for o in orders]
+
 
 @router.get("/queue/nanesenie", response_model=list[OrderRead])
 def get_nanesenie_queue(
@@ -728,16 +979,19 @@ def get_nanesenie_queue(
     current_user: User = Depends(get_current_user),
 ):
     require_roles(current_user, [Role.ADMIN, Role.NANESENIE, Role.RECEPTION])
+    # Очередь нанесения: заказы в CONFIRMED статусе, только если сессия производит нанесения
     queue = (
         db.query(Order)
+        .join(SessionModel, SessionModel.id == Order.session_id)
         .filter(
+            SessionModel.has_nanesenie.is_(True),
             Order.nanesenie_master_id.is_(None),
-            Order.status == OrderStatus.PRINTED.value,
+            Order.status == OrderStatus.CONFIRMED.value,
         )
         .order_by(Order.id.asc())
         .all()
     )
-    return queue
+    return [serialize_order(order, db) for order in queue]
 
 @router.post("/{order_id}/take_nanesenie", response_model=OrderRead)
 def take_nanesenie(
@@ -755,16 +1009,23 @@ def take_nanesenie(
             detail=f"Order with id {order_id} not found",
         )
 
+    order_session = get_order_session(db, order)
+    if not order_session.has_nanesenie:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nanesenie stage is disabled for this session",
+        )
+
     if order.nanesenie_master_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order {order_id} is already taken for nanesenie",
         )
 
-    if order.status != OrderStatus.PRINTED.value:
+    if order.status != OrderStatus.CONFIRMED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order must be printed before nanesenie",
+            detail="Order must be in CONFIRMED status to start nanesenie",
         )
 
     order.nanesenie_master_id = current_user.id
@@ -772,7 +1033,7 @@ def take_nanesenie(
     log_order_event(db, order.id, "nanesenie_started", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
 
 @router.post("/{order_id}/finish_nanesenie", response_model=OrderRead)
 def finish_nanesenie(
@@ -788,6 +1049,13 @@ def finish_nanesenie(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Order with id {order_id} not found",
+        )
+
+    order_session = get_order_session(db, order)
+    if not order_session.has_nanesenie:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nanesenie stage is disabled for this session",
         )
 
     if order.status != OrderStatus.NANESENIE.value:
@@ -806,7 +1074,41 @@ def finish_nanesenie(
     log_order_event(db, order.id, "nanesenie_finished", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
+
+
+@router.post("/{order_id}/release_nanesenie", response_model=OrderRead)
+def release_nanesenie_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.NANESENIE])
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+
+    if order.status != OrderStatus.NANESENIE.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order is not currently in nanesenie",
+        )
+
+    if order.nanesenie_master_id != current_user.id and current_user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned nanesenie master or admin can release this order",
+        )
+
+    order.nanesenie_master_id = None
+    order.status = OrderStatus.PRINTED.value
+    commit_with_rollback(db)
+    db.refresh(order)
+    return serialize_order(order, db)
 
 @router.get("/board/status", response_model=list[OrderRead])
 def get_board(
@@ -828,21 +1130,35 @@ def get_board(
         .order_by(Order.id.asc())
         .all()
     )
-    return orders
+    return [serialize_order(order, db) for order in orders]
 
 
-@router.post("/next/nanesenie", response_model=OrderRead)
+@router.post("/next/nanesenie", response_model=NanesenieMasterTaskRead)
 def get_next_nanesenie_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     require_roles(current_user, [Role.ADMIN, Role.NANESENIE])
 
+    if current_user.role == Role.NANESENIE:
+        active_order = (
+            db.query(Order)
+            .filter(
+                Order.nanesenie_master_id == current_user.id,
+                Order.status == OrderStatus.NANESENIE.value,
+            )
+            .first()
+        )
+        if active_order:
+            return _build_nanesenie_master_task(active_order, db)
+
     order = (
         db.query(Order)
+        .join(SessionModel, SessionModel.id == Order.session_id)
         .filter(
+            SessionModel.has_nanesenie.is_(True),
             Order.nanesenie_master_id.is_(None),
-            Order.status == OrderStatus.PRINTED.value,
+            Order.status == OrderStatus.CONFIRMED.value,
         )
         .order_by(Order.id.asc())
         .first()
@@ -859,7 +1175,253 @@ def get_next_nanesenie_order(
     log_order_event(db, order.id, "nanesenie_started", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return _build_nanesenie_master_task(order, db)
+
+
+@router.get("/my/nanesenie", response_model=NanesenieMasterTaskRead)
+def get_my_active_nanesenie_order(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.NANESENIE])
+
+    order = (
+        db.query(Order)
+        .filter(
+            Order.nanesenie_master_id == current_user.id,
+            Order.status == OrderStatus.NANESENIE.value,
+        )
+        .first()
+    )
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active nanesenie order",
+        )
+    return _build_nanesenie_master_task(order, db)
+
+
+# ==================== Endpoints for Printing Master (мастер печати) ====================
+
+@router.get("/queue/printing", response_model=list[OrderRead])
+def get_printing_queue(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT, Role.RECEPTION])
+
+    # Для каждой сессии определяем, какие статусы готовых заказов видны на печать
+    # Если есть нанесение: NANESENIE_DONE
+    # Если нет нанесения: CONFIRMED
+    queue = (
+        db.query(Order)
+        .outerjoin(SessionModel, SessionModel.id == Order.session_id)
+        .filter(
+            Order.print_master_id.is_(None),
+            or_(
+                and_(SessionModel.has_nanesenie.is_(True), Order.status == OrderStatus.NANESENIE_DONE.value),
+                and_(SessionModel.has_nanesenie.is_(False), Order.status == OrderStatus.CONFIRMED.value),
+            ),
+        )
+        .order_by(Order.id.asc())
+        .all()
+    )
+    return queue
+
+
+@router.post("/{order_id}/take_printing", response_model=OrderRead)
+def take_printing_task(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    session = Depends(require_active_session),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT])
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+    
+    if order.print_master_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Order {order_id} is already assigned for printing",
+        )
+        
+    if current_user.role == Role.PRINT:
+        active_order = (
+            db.query(Order)
+            .filter(
+                Order.print_master_id == current_user.id,
+                Order.status == OrderStatus.PRINTING.value,
+            )
+            .first()
+        )
+        if active_order:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have an active printing task",
+            )
+    
+    if order.status not in {OrderStatus.NANESENIE_DONE.value, OrderStatus.CONFIRMED.value}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Order status must be NANESENIE_DONE or CONFIRMED, but is {order.status}",
+        )
+        
+    order.print_master_id = current_user.id
+    order.status = OrderStatus.PRINTING.value
+    log_order_event(db, order.id, "printing_started", user_id=current_user.id)
+    order.time_print_started = datetime.now(timezone.utc)
+    commit_with_rollback(db)
+    db.refresh(order)
+    return serialize_order(order, db)
+
+
+@router.post("/next/printing", response_model=PrintMasterTaskRead)
+def get_next_printing_order(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT])
+
+    if current_user.role == Role.PRINT:
+        active_order = (
+            db.query(Order)
+            .filter(
+                Order.print_master_id == current_user.id,
+                Order.status == OrderStatus.PRINTING.value,
+            )
+            .first()
+        )
+        if active_order:
+            return _build_print_master_task(active_order, db)
+
+    order = (
+        db.query(Order)
+        .outerjoin(SessionModel, SessionModel.id == Order.session_id)
+        .filter(
+            Order.print_master_id.is_(None),
+            or_(
+                and_(SessionModel.has_nanesenie.is_(True), Order.status == OrderStatus.NANESENIE_DONE.value),
+                and_(SessionModel.has_nanesenie.is_(False), Order.status == OrderStatus.CONFIRMED.value),
+            ),
+        )
+        .order_by(Order.id.asc())
+        .first()
+    )
+
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Printing queue is empty",
+        )
+
+    order.print_master_id = current_user.id
+    order.status = OrderStatus.PRINTING.value
+    log_order_event(db, order.id, "printing_started", user_id=current_user.id)
+    order.time_print_started = datetime.now(timezone.utc)
+    commit_with_rollback(db)
+    db.refresh(order)
+    return _build_print_master_task(order, db)
+
+
+@router.get("/my/printing", response_model=PrintMasterTaskRead)
+def get_my_active_printing_order(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT])
+
+    order = (
+        db.query(Order)
+        .filter(
+            Order.print_master_id == current_user.id,
+            Order.status == OrderStatus.PRINTING.value,
+        )
+        .first()
+    )
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active printing task",
+        )
+    return _build_print_master_task(order, db)
+
+
+@router.post("/{order_id}/finish_printing", response_model=OrderRead)
+def finish_printing_task(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    session = Depends(require_active_session),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT])
+    
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+    
+    if order.status != OrderStatus.PRINTING.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order is not currently being printed",
+        )
+    
+    if order.print_master_id != current_user.id and current_user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned printing master or admin can finish this task",
+        )
+    
+    order.status = OrderStatus.PRINTED.value
+    log_order_event(db, order.id, "printing_finished", user_id=current_user.id)
+    order.time_print_finished = datetime.now(timezone.utc)
+    commit_with_rollback(db)
+    db.refresh(order)
+    return serialize_order(order, db)
+
+
+@router.post("/{order_id}/release_printing", response_model=OrderRead)
+def release_printing_task(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN, Role.PRINT])
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Order with id {order_id} not found",
+        )
+
+    if order.status != OrderStatus.PRINTING.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order is not currently being printed",
+        )
+
+    if order.print_master_id != current_user.id and current_user.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned printing master or admin can release this task",
+        )
+
+    order.print_master_id = None
+    order.status = OrderStatus.CONFIRMED.value
+    log_order_event(db, order.id, "printing_released", user_id=current_user.id)
+    commit_with_rollback(db)
+    db.refresh(order)
+    return serialize_order(order, db)
+
 
 @router.post("/{order_id}/cancel_request", response_model=OrderRead)
 def request_cancel_order(order_id: int,
@@ -886,7 +1448,7 @@ def request_cancel_order(order_id: int,
     log_order_event(db, order.id, "cancel_requested", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
 
 @router.post("/{order_id}/cancel_approve", response_model=OrderRead)
 def approve_cancel_order(order_id: int,
@@ -922,7 +1484,7 @@ def approve_cancel_order(order_id: int,
     clear_cancel_request_fields(order)
     commit_with_rollback(db)
     db.refresh(order)
-    return order    
+    return serialize_order(order, db)
 
 @router.post("/{order_id}/cancel_reject", response_model=OrderRead)
 def reject_cancel_order(order_id: int,
@@ -948,7 +1510,74 @@ def reject_cancel_order(order_id: int,
     order.cancel_reason = None
     commit_with_rollback(db)
     db.refresh(order)
-    return order
+    return serialize_order(order, db)
+
+
+@router.delete("/all")
+def delete_all_orders(
+    restore_stock: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [Role.ADMIN])
+
+    orders = db.query(Order).all()
+    if not orders:
+        return {
+            "deleted_orders": 0,
+            "deleted_events": 0,
+            "restocked_items": 0,
+        }
+
+    restocked_items = 0
+    if restore_stock:
+        restock_allowed_statuses = {
+            OrderStatus.NEW.value,
+            OrderStatus.CONFIRMED.value,
+            OrderStatus.PRINTING.value,
+            OrderStatus.PRINTED.value,
+            OrderStatus.NANESENIE.value,
+            OrderStatus.NANESENIE_DONE.value,
+            OrderStatus.DELIVERING.value,
+            OrderStatus.CANCEL_REQUESTED.value,
+        }
+
+        for order in orders:
+            if order.status not in restock_allowed_statuses:
+                continue
+            if order.model_id is None or order.size_id is None:
+                continue
+
+            model_size = (
+                db.query(CatalogModelSize)
+                .filter(
+                    CatalogModelSize.model_id == order.model_id,
+                    CatalogModelSize.size_id == order.size_id,
+                )
+                .first()
+            )
+            if model_size is None:
+                continue
+            model_size.stock_qty += 1
+            restocked_items += 1
+
+    order_ids = [order.id for order in orders]
+    deleted_events = (
+        db.query(OrderEvent)
+        .filter(OrderEvent.order_id.in_(order_ids))
+        .delete(synchronize_session=False)
+    )
+
+    for order in orders:
+        db.delete(order)
+
+    commit_with_rollback(db)
+
+    return {
+        "deleted_orders": len(order_ids),
+        "deleted_events": deleted_events,
+        "restocked_items": restocked_items,
+    }
 
 @router.delete("/{order_id}")
 def delete_order(order_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

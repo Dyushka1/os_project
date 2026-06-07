@@ -302,6 +302,61 @@ def test_create_order_saves_promo_and_notify_fields(api_fixture):
     assert body["notify_contact"] == "@promo_user"
 
 
+def test_delete_all_orders_removes_orders_events_and_restores_stock(api_fixture):
+    client, session_local, ids = api_fixture
+
+    response_1 = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Bulk 1", "phone": "+74444444441"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+    response_2 = client.post(
+        "/orders/",
+        json={
+            "client": {"name": "Bulk 2", "phone": "+74444444442"},
+            "model_id": ids["model_1_id"],
+            "size_id": ids["size_1_id"],
+        },
+    )
+
+    assert response_1.status_code == 200
+    assert response_2.status_code == 200
+
+    delete_response = client.delete("/orders/all", params={"restore_stock": "true"})
+    assert delete_response.status_code == 200
+    payload = delete_response.json()
+    assert payload["deleted_orders"] == 2
+    assert payload["deleted_events"] >= 2
+    assert payload["restocked_items"] == 2
+
+    db = session_local()
+    assert db.query(Order).count() == 0
+    assert db.query(OrderEvent).count() == 0
+    model_size = (
+        db.query(CatalogModelSize)
+        .filter(
+            CatalogModelSize.model_id == ids["model_1_id"],
+            CatalogModelSize.size_id == ids["size_1_id"],
+        )
+        .first()
+    )
+    assert model_size is not None
+    assert model_size.stock_qty == 5
+    db.close()
+
+
+def test_delete_all_orders_admin_only(api_fixture):
+    client, _session_local, _ids = api_fixture
+
+    set_current_user_role(Role.PRINT, user_id=2, username="printer")
+    response = client.delete("/orders/all")
+
+    assert response.status_code == 403
+
+
 def test_search_orders_finds_by_promo_code(api_fixture):
     client, _session_local, ids = api_fixture
 

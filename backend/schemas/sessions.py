@@ -1,6 +1,15 @@
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
+
+class SessionStartRequest(BaseModel):
+    has_nanesenie: bool = True
+
+
+class SessionRestartRequest(BaseModel):
+    has_nanesenie: bool = True
+    restore_stock: bool = False
+
 class SessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     

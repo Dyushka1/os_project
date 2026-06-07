@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth import get_current_user, require_roles
+from auth import get_current_user_optional, get_current_user, require_roles
 from database import get_db
 from models.catalog_model_sizes import CatalogModelSize
 from models.catalog_models import CatalogModel
@@ -29,14 +29,21 @@ def commit_with_rollback(db: Session) -> None:
 
 
 @router.get("/", response_model=list[CatalogModelSizeRead])
-def list_model_sizes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    require_roles(current_user, [Role.ADMIN])
+def list_model_sizes(db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
+    # public read access
     return db.query(CatalogModelSize).order_by(CatalogModelSize.id.asc()).all()
 
 
-@router.get("/{item_id}", response_model=CatalogModelSizeRead)
-def get_model_size(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+@router.delete("/all")
+def delete_all_model_sizes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_roles(current_user, [Role.ADMIN])
+    deleted_count = db.query(CatalogModelSize).delete(synchronize_session=False)
+    commit_with_rollback(db)
+    return {"deleted_count": deleted_count}
+
+
+@router.get("/{item_id}", response_model=CatalogModelSizeRead)
+def get_model_size(item_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user_optional)):
     item = db.query(CatalogModelSize).filter(CatalogModelSize.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model-size link not found")

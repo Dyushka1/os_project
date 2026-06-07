@@ -9,5 +9,7 @@ class CatalogPrint(Base):
     name = Column(String, index=True, nullable=False)
     print_type = Column(String, index=True, nullable=False, default="regular")
     image_url = Column(String, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
     stock_qty = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True, index=True)

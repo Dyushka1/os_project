@@ -7,6 +7,7 @@ class CatalogModelCreate(BaseModel):
     color_id: int
     front_image_url: str | None = None
     back_image_url: str | None = None
+    default_print_id: int | None = None
     is_active: bool = True
 
 
@@ -16,6 +17,7 @@ class CatalogModelUpdate(BaseModel):
     color_id: int | None = None
     front_image_url: str | None = None
     back_image_url: str | None = None
+    default_print_id: int | None = None
     is_active: bool | None = None
 
 
@@ -28,4 +30,5 @@ class CatalogModelRead(BaseModel):
     color_id: int
     front_image_url: str | None = None
     back_image_url: str | None = None
+    default_print_id: int | None = None
     is_active: bool

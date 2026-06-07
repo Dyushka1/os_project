@@ -19,12 +19,14 @@ class OrderCreate(BaseModel):
     print_x: int | None = None
     print_y: int | None = None
     print_angle: float | None = None
+    print_scale: int | None = None
 
 
 class OrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    order_number: int | None = None
     client_id: int | None = None
     client: ClientRead | None = None
     status: OrderStatus
@@ -54,6 +56,7 @@ class OrderRead(BaseModel):
     print_x: int | None = None
     print_y: int | None = None
     print_angle: float | None = None
+    print_scale: int | None = None
     
     color_id: int | None = None
     model_id: int | None = None
@@ -76,6 +79,7 @@ class OrderCatalogUpdate(BaseModel):
     print_x: int | None = None
     print_y: int | None = None
     print_angle: float | None = None
+    print_scale: int | None = None
     
 class OrderCancelRequest(BaseModel):
     reason: str
@@ -92,3 +96,77 @@ class OrderEventRead(BaseModel):
     event_type: str
     created_at: datetime
     user_id: int | None = None
+
+
+# ==================== Master-specific schemas ====================
+
+class PrintMasterTaskRead(BaseModel):
+    """
+    Task for print master (мастер печати).
+    Contains order info + pre-resolved catalog names.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int  # order ID
+    order_id: int | None = None  # alias for id
+    order_number: int | None = None
+    
+    # Изделие
+    model_name: str | None = None
+    size_code: str | None = None
+    color_name: str | None = None
+    
+    # Параметры печати (могут быть пусты если не установлены клиентом)
+    print_side: str | None = None
+    print_x: int | None = None
+    print_y: int | None = None
+    print_angle: float | None = None
+    print_scale: int | None = None
+    print_text: str | None = None
+    print_font: str | None = None
+    
+    # Принт (из каталога)
+    print_id: int | None = None
+    print_name: str | None = None
+    print_type: str | None = None
+    print_image_url: str | None = None
+
+    # Изображения изделия (модель спереди/сзади)
+    front_image_url: str | None = None
+    back_image_url: str | None = None
+
+
+class NanesenieMasterTaskRead(BaseModel):
+    """
+    Task for nanesenie master (мастер принтов).
+    Contains order info + print details + pre-resolved catalog names.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int  # order ID
+    order_id: int | None = None  # alias for id
+    order_number: int | None = None
+    
+    # Изделие
+    model_name: str | None = None
+    size_code: str | None = None
+    color_name: str | None = None
+    
+    # Принт (то, что нужно нанести)
+    print_id: int | None = None
+    print_name: str | None = None
+    print_type: str | None = None
+    print_image_url: str | None = None
+    print_text: str | None = None
+    print_font: str | None = None
+    print_side: str | None = None
+    print_x: int | None = None
+    print_y: int | None = None
+    print_angle: float | None = None
+    print_scale: int | None = None
+    print_width: int | None = None
+    print_height: int | None = None
+
+    # Изображения изделия (для визуального превью у мастера)
+    front_image_url: str | None = None
+    back_image_url: str | None = None

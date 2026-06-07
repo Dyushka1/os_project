@@ -2,6 +2,8 @@ import { Button, Card, Form, Input, InputNumber, Select, Space, message } from "
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { createOrder, type CreateOrderPayload } from "./ordersApi";
+import { isClientUser } from "../../auth/token";
+import BrandedScreen from "../branding/BrandedScreen";
 
 type OrderFormValues = {
   client_name?: string;
@@ -13,17 +15,22 @@ type OrderFormValues = {
   print_id?: number;
   promo_code?: string;
   notify_method?: string;
-  notify_contract?: string;
+  notify_contact?: string;
 };
 
 export default function CreateOrder() {
     const [form] = Form.useForm<OrderFormValues>();
     const navigate = useNavigate();
+  const clientMode = isClientUser();
 
     const mutation = useMutation({
         mutationFn: (payload: CreateOrderPayload) => createOrder(payload),
         onSuccess: (createdOrder) => {
             message.success(`Заказ #${createdOrder.id} успешно создан`);
+            if (clientMode) {
+              navigate("/client", { replace: true });
+              return;
+            }
             navigate(`/orders/${createdOrder.id}`);
         },
         onError: (error: any) => {
@@ -45,13 +52,13 @@ export default function CreateOrder() {
             print_id: values.print_id,
             promo_code: values.promo_code,
             notify_method: values.notify_method,
-            notify_contract: values.notify_contract,
+            notify_contact: values.notify_contact,
         };
         mutation.mutate(payload);
     };
 
-    return (
-         <Card title="Создание заказа" style={{ margin: 16 }}>
+    const content = (
+      <Card title="Создание заказа" style={{ margin: 16 }}>
       <Form form={form} layout="vertical" onFinish={onFinish}>
         <Space size={16} style={{ display: "flex" }} align="start">
           <Form.Item
@@ -84,8 +91,12 @@ export default function CreateOrder() {
             <Input placeholder="Иван" style={{ width: 220 }} />
           </Form.Item>
 
-          <Form.Item label="Телефон клиента" name="client_phone">
-            <Input placeholder="+7..." style={{ width: 220 }} />
+          <Form.Item
+            label="Телефон клиента"
+            name="client_phone"
+            rules={clientMode ? [] : [{ required: true, message: "Телефон обязателен" }]}
+          >
+            <Input placeholder={clientMode ? "Заполнится автоматически" : "+7..."} style={{ width: 220 }} />
           </Form.Item>
 
           <Form.Item label="Email клиента" name="client_email">
@@ -121,10 +132,25 @@ export default function CreateOrder() {
           <Button type="primary" htmlType="submit" loading={mutation.isPending}>
             Создать заказ
           </Button>
-          <Button onClick={() => navigate("/orders")}>Назад к заказам</Button>
+          <Button onClick={() => navigate("/admin")}>На главный экран</Button>
         </Space>
       </Form>
     </Card>
-  );
+    );
+
+    if (clientMode) {
+      return (
+        <BrandedScreen
+          backgroundKey="kiosk-bg"
+          idleSplash
+          splashTitle="Нажмите для продолжения"
+          splashSubtitle="После 10 минут бездействия терминал показывает заставку"
+        >
+          {content}
+        </BrandedScreen>
+      );
+    }
+
+    return content;
 }
     
