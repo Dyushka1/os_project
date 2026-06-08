@@ -33,7 +33,10 @@ services:
       sh -c "alembic upgrade head && python -m scripts.seed && uvicorn main:app --host 0.0.0.0 --port 8000"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_TELEGRAM_BOT_USERNAME: FXP_design_bot
     container_name: factory_frontend
     restart: unless-stopped
     ports:
