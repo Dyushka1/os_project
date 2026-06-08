@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Card, Space, Tag, Typography } from "antd";
 import { resolveApiUrl } from "../utils/resolveApiUrl";
+import DraggableFrame, { type FrameRect } from "./DraggableFrame";
 
 const { Text } = Typography;
 
@@ -13,10 +14,17 @@ const PRINT_ZONE_INSETS = {
   left: 0.26,
 };
 
+// Base size of the print box as fraction of zone (100%)
 const BOX_BASE_RATIOS = {
   image: { width: 0.72, height: 0.34 },
-  text: { width: 0.62, height: 0.22 },
+  text:  { width: 0.62, height: 0.22 },
 };
+
+// Zone dimensions as fraction of full preview rect
+const ZW = 1 - PRINT_ZONE_INSETS.left - PRINT_ZONE_INSETS.right; // 0.48
+const ZH = 1 - PRINT_ZONE_INSETS.top  - PRINT_ZONE_INSETS.bottom; // 0.52
+const ZL = PRINT_ZONE_INSETS.left; // 0.26
+const ZT = PRINT_ZONE_INSETS.top;  // 0.24
 
 const SWIPE_THRESHOLD_RATIO = 0.3;
 
@@ -62,621 +70,323 @@ type Props = {
   editable?: boolean;
 };
 
-type InteractionMode = "move" | "resize" | "rotate";
+// ─── Coordinate helpers ───────────────────────────────────────────────────────
+//
+// GarmentPreview stores print position as:
+//   printX/Y  — center of box as % of full preview rect (0-100)
+//   printScaleX/Y — scale factor (100 = 100% = base box size)
+//
+// DraggableFrame needs:
+//   x/y  — top-left corner as % of the zone element (0-100)
+//   w/h  — dimensions as % of the zone element (0-100)
+//
+// Zone is inset 26% left/right, 24% top/bottom of the full preview rect.
+//
+// Math (no pixel measurements needed):
+//   boxW_zone% = clamp(100 * baseBox.width  * scaleX/100, 2, 94)
+//   cx_zone%   = (printX/100 - ZL) / ZW * 100
+//   frame.x    = cx_zone - boxW_zone/2
+//
+// Inverse:
+//   printX = (ZL + (cx_zone/100) * ZW) * 100
+//   scaleX = frame.w / baseBox.width
 
-type InteractionState = {
-  mode: InteractionMode;
-  printSlot: 1 | 2;
-  pointerId: number;
-  startPointerX: number;
-  startPointerY: number;
-  startCenterX: number;
-  startCenterY: number;
-  startScale: number;
-  startScaleX: number;
-  startScaleY: number;
-  startAngle: number;
-  startAngleToPointer: number;
-  startDistanceX: number;
-  startDistanceY: number;
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
+function clampF(v: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
-function normalizeAngle(angle: number) {
-  let next = angle % 360;
-  if (next > 180) next -= 360;
-  if (next < -180) next += 360;
-  return next;
+function propsToFrame(
+  printX: number, printY: number,
+  scaleX: number, scaleY: number,
+  base: { width: number; height: number },
+): FrameRect {
+  const w = clampF(100 * base.width  * (scaleX / 100), 2, 94);
+  const h = clampF(100 * base.height * (scaleY / 100), 2, 94);
+  const cx = (printX / 100 - ZL) / ZW * 100;
+  const cy = (printY / 100 - ZT) / ZH * 100;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
-function getPreviewMetrics(rect: DOMRect, scaleX: number, scaleY: number, isText: boolean) {
-  const zone = {
-    left: rect.width * PRINT_ZONE_INSETS.left,
-    top: rect.height * PRINT_ZONE_INSETS.top,
-    width: rect.width * (1 - PRINT_ZONE_INSETS.left - PRINT_ZONE_INSETS.right),
-    height: rect.height * (1 - PRINT_ZONE_INSETS.top - PRINT_ZONE_INSETS.bottom),
+function frameToProps(
+  frame: FrameRect,
+  base: { width: number; height: number },
+): { printX: number; printY: number; printScaleX: number; printScaleY: number } {
+  const cx = frame.x + frame.w / 2; // center % of zone
+  const cy = frame.y + frame.h / 2;
+  return {
+    printX:      Math.round((ZL + (cx / 100) * ZW) * 100),
+    printY:      Math.round((ZT + (cy / 100) * ZH) * 100),
+    printScaleX: Math.round(frame.w / base.width),
+    printScaleY: Math.round(frame.h / base.height),
   };
-
-  const ratios = isText ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
-  const boxWidth = Math.min(zone.width * 0.94, zone.width * ratios.width * scaleX);
-  const boxHeight = Math.min(zone.height * 0.94, zone.height * ratios.height * scaleY);
-  const centerX = rect.width * 0.5;
-  const centerY = rect.height * 0.5;
-
-  return { zone, boxWidth, boxHeight, centerX, centerY };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function GarmentPreview(props: Props) {
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const interactionRef = useRef<InteractionState | null>(null);
-  const [interactionMode, setInteractionMode] = useState<InteractionMode | null>(null);
 
+  // Swipe to flip side
   const swipeRef = useRef<{ startX: number; pointerId: number } | null>(null);
   const swipeOffsetRef = useRef(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [swipeAnimating, setSwipeAnimating] = useState(false);
 
-  const normalizedPrintScale = clamp(props.printScale ?? 100, 20, 250);
-  const scaleFactor = normalizedPrintScale / 100;
-  const normalizedPrintScaleX = clamp(props.printScaleX ?? normalizedPrintScale, 20, 250);
-  const normalizedPrintScaleY = clamp(props.printScaleY ?? normalizedPrintScale, 20, 250);
-  const scaleFactorX = normalizedPrintScaleX / 100;
-  const scaleFactorY = normalizedPrintScaleY / 100;
-
-  const normalizedPrint2Scale = clamp(props.print2Scale ?? 100, 20, 250);
-  const normalizedPrint2ScaleX = clamp(props.print2ScaleX ?? normalizedPrint2Scale, 20, 250);
-  const normalizedPrint2ScaleY = clamp(props.print2ScaleY ?? normalizedPrint2Scale, 20, 250);
-  const scale2FactorX = normalizedPrint2ScaleX / 100;
-  const scale2FactorY = normalizedPrint2ScaleY / 100;
-
-  const hasCustomText = !!props.printText?.trim();
-  const textPrint = isTextPrint(props.print) || hasCustomText;
-  const printImageUrl = resolveApiUrl(props.print?.image_url);
-  const modelImageUrl = resolveApiUrl(
+  const hasCustomText  = !!props.printText?.trim();
+  const textPrint      = isTextPrint(props.print) || hasCustomText;
+  const printImageUrl  = resolveApiUrl(props.print?.image_url);
+  const modelImageUrl  = resolveApiUrl(
     props.previewSide === "back"
       ? props.model?.back_image_url || props.model?.front_image_url
       : props.model?.front_image_url || props.model?.back_image_url,
   );
-  const hasPrintContent = !!printImageUrl || textPrint || !!props.print?.name;
-  const showPrintLayer = hasPrintContent && (!props.printSide || props.previewSide === props.printSide);
 
-  const print2ImageUrl = resolveApiUrl(props.print2?.image_url);
+  const hasPrintContent  = !!printImageUrl || textPrint || !!props.print?.name;
+  const showPrintLayer   = hasPrintContent && (!props.printSide || props.previewSide === props.printSide);
+
   const hasCustomText2 = !!props.print2Text?.trim();
-  const textPrint2 = isTextPrint(props.print2) || hasCustomText2;
+  const textPrint2     = isTextPrint(props.print2) || hasCustomText2;
+  const print2ImageUrl = resolveApiUrl(props.print2?.image_url);
   const hasPrint2Content = !!print2ImageUrl || textPrint2 || !!props.print2?.name;
-  const showPrint2Layer = hasPrint2Content && (!props.print2Side || props.previewSide === props.print2Side);
+  const showPrint2Layer  = hasPrint2Content && (!props.print2Side || props.previewSide === props.print2Side);
 
+  // Font size for text prints — controlled independently by printScale slider
+  const scaleFactor  = clampF(props.printScale  ?? 100, 5, 600) / 100;
+  const scale2Factor = clampF(props.print2Scale ?? 100, 5, 600) / 100;
+
+  // Compute DraggableFrame rects from props
+  const base1 = textPrint  ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
+  const base2 = textPrint2 ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
+
+  const frame1 = propsToFrame(
+    props.printX  ?? 50, props.printY  ?? 32,
+    clampF(props.printScaleX  ?? 100, 5, 600),
+    clampF(props.printScaleY  ?? 100, 5, 600),
+    base1,
+  );
+  const frame2 = propsToFrame(
+    props.print2X ?? 50, props.print2Y ?? 65,
+    clampF(props.print2ScaleX ?? 100, 5, 600),
+    clampF(props.print2ScaleY ?? 100, 5, 600),
+    base2,
+  );
+
+  // Swipe handlers
   const handleSwipeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (interactionRef.current || !props.onSideChange) return;
+    if (!props.onSideChange) return;
     swipeRef.current = { startX: event.clientX, pointerId: event.pointerId };
     swipeOffsetRef.current = 0;
     setSwipeAnimating(false);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const handleInteractionStart = (mode: InteractionMode, printSlot: 1 | 2 = 1) => (event: ReactPointerEvent<HTMLButtonElement | HTMLDivElement>) => {
-    if (!props.editable || !previewRef.current) return;
+  const handleSwipeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!swipeRef.current) return;
+    if (event.pointerId !== swipeRef.current.pointerId) return;
     event.preventDefault();
-    event.stopPropagation();
-
-    const rect = previewRef.current.getBoundingClientRect();
-    const isSlot2 = printSlot === 2;
-    const sx = isSlot2 ? scale2FactorX : scaleFactorX;
-    const sy = isSlot2 ? scale2FactorY : scaleFactorY;
-    const isTextSlot = isSlot2 ? textPrint2 : textPrint;
-    const metrics = getPreviewMetrics(rect, sx, sy, isTextSlot);
-    const pointerX = event.clientX - rect.left;
-    const pointerY = event.clientY - rect.top;
-    const cx = isSlot2 ? (props.print2X ?? 50) : (props.printX ?? 50);
-    const cy = isSlot2 ? (props.print2Y ?? 27) : (props.printY ?? 27);
-    const centerX = rect.width * (cx / 100);
-    const centerY = rect.height * (cy / 100);
-
-    interactionRef.current = {
-      mode,
-      printSlot,
-      pointerId: event.pointerId,
-      startPointerX: pointerX,
-      startPointerY: pointerY,
-      startCenterX: centerX,
-      startCenterY: centerY,
-      startScale: isSlot2 ? normalizedPrint2Scale : normalizedPrintScale,
-      startScaleX: isSlot2 ? normalizedPrint2ScaleX : normalizedPrintScaleX,
-      startScaleY: isSlot2 ? normalizedPrint2ScaleY : normalizedPrintScaleY,
-      startAngle: isSlot2 ? (props.print2Angle ?? 0) : (props.printAngle ?? 0),
-      startAngleToPointer: Math.atan2(pointerY - centerY, pointerX - centerX),
-      startDistanceX: metrics.boxWidth / 2,
-      startDistanceY: metrics.boxHeight / 2,
-    };
-
-    setInteractionMode(mode);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const dx = event.clientX - swipeRef.current.startX;
+    swipeOffsetRef.current = dx;
+    setSwipeOffset(dx);
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!interactionRef.current && swipeRef.current) {
-      if (event.pointerId !== swipeRef.current.pointerId) return;
-      event.preventDefault();
-      const dx = event.clientX - swipeRef.current.startX;
-      swipeOffsetRef.current = dx;
-      setSwipeOffset(dx);
-      return;
-    }
-
-    const current = interactionRef.current;
-    if (!current || !previewRef.current || !props.editable) return;
-
-    event.preventDefault();
-    const rect = previewRef.current.getBoundingClientRect();
-    const pointerX = event.clientX - rect.left;
-    const pointerY = event.clientY - rect.top;
-    const metrics = getPreviewMetrics(rect, scaleFactorX, scaleFactorY, textPrint);
-    const zoneLeft = metrics.zone.left;
-    const zoneTop = metrics.zone.top;
-    const zoneRight = metrics.zone.left + metrics.zone.width;
-    const zoneBottom = metrics.zone.top + metrics.zone.height;
-
-    const isSlot2 = current.printSlot === 2;
-
-    if (current.mode === "move") {
-      const nextCenterX = pointerX - (current.startPointerX - current.startCenterX);
-      const nextCenterY = pointerY - (current.startPointerY - current.startCenterY);
-      const halfWidth = metrics.boxWidth / 2;
-      const halfHeight = metrics.boxHeight / 2;
-      const clampedCenterX = zoneRight - halfWidth < zoneLeft + halfWidth
-        ? zoneLeft + metrics.zone.width / 2
-        : clamp(nextCenterX, zoneLeft + halfWidth, zoneRight - halfWidth);
-      const clampedCenterY = zoneBottom - halfHeight < zoneTop + halfHeight
-        ? zoneTop + metrics.zone.height / 2
-        : clamp(nextCenterY, zoneTop + halfHeight, zoneBottom - halfHeight);
-
-      const x = Math.round((clampedCenterX / rect.width) * 100);
-      const y = Math.round((clampedCenterY / rect.height) * 100);
-      if (isSlot2) props.onUpdatePrint2?.({ print2X: x, print2Y: y });
-      else props.onUpdatePrint?.({ printX: x, printY: y });
-      return;
-    }
-
-    if (current.mode === "resize") {
-      const distanceX = Math.max(Math.abs(pointerX - current.startCenterX), 1);
-      const distanceY = Math.max(Math.abs(pointerY - current.startCenterY), 1);
-      const ratioX = distanceX / Math.max(current.startDistanceX, 1);
-      const ratioY = distanceY / Math.max(current.startDistanceY, 1);
-      const nextScaleX = clamp(current.startScaleX * ratioX, 20, 250);
-      const nextScaleY = clamp(current.startScaleY * ratioY, 20, 250);
-      if (isSlot2) props.onUpdatePrint2?.({ print2ScaleX: Math.round(nextScaleX), print2ScaleY: Math.round(nextScaleY) });
-      else props.onUpdatePrint?.({ printScaleX: Math.round(nextScaleX), printScaleY: Math.round(nextScaleY) });
-      return;
-    }
-
-    if (current.mode === "rotate") {
-      const angleToPointer = Math.atan2(pointerY - current.startCenterY, pointerX - current.startCenterX);
-      const delta = ((angleToPointer - current.startAngleToPointer) * 180) / Math.PI;
-      const nextAngle = normalizeAngle(current.startAngle + delta);
-      if (isSlot2) props.onUpdatePrint2?.({ print2Angle: Math.round(nextAngle) });
-      else props.onUpdatePrint?.({ printAngle: Math.round(nextAngle) });
-    }
-  };
-
-  const endInteraction = (event?: ReactPointerEvent<HTMLDivElement>) => {
-    if (swipeRef.current) {
-      if (event && event.pointerId !== swipeRef.current.pointerId) return;
-      if (props.onSideChange && previewRef.current) {
-        const threshold = previewRef.current.getBoundingClientRect().width * SWIPE_THRESHOLD_RATIO;
-        if (Math.abs(swipeOffsetRef.current) > threshold) {
-          props.onSideChange(props.previewSide === "front" ? "back" : "front");
-        }
+  const handleSwipeEnd = (event?: ReactPointerEvent<HTMLDivElement>) => {
+    if (!swipeRef.current) return;
+    if (event && event.pointerId !== swipeRef.current.pointerId) return;
+    if (props.onSideChange && previewRef.current) {
+      const threshold = previewRef.current.getBoundingClientRect().width * SWIPE_THRESHOLD_RATIO;
+      if (Math.abs(swipeOffsetRef.current) > threshold) {
+        props.onSideChange(props.previewSide === "front" ? "back" : "front");
       }
-      swipeRef.current = null;
-      swipeOffsetRef.current = 0;
-      setSwipeAnimating(true);
-      setSwipeOffset(0);
-      return;
     }
-
-    if (event && interactionRef.current && event.pointerId !== interactionRef.current.pointerId) return;
-    interactionRef.current = null;
-    setInteractionMode(null);
+    swipeRef.current = null;
+    swipeOffsetRef.current = 0;
+    setSwipeAnimating(true);
+    setSwipeOffset(0);
   };
-
-  const baseBox = textPrint ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
-  const zoneWidthPercent = (1 - PRINT_ZONE_INSETS.left - PRINT_ZONE_INSETS.right) * 100;
-  const zoneHeightPercent = (1 - PRINT_ZONE_INSETS.top - PRINT_ZONE_INSETS.bottom) * 100;
-  const boxWidthPercent = Math.min(zoneWidthPercent * 0.94, Math.max(zoneWidthPercent * 0.2, zoneWidthPercent * baseBox.width * scaleFactorX));
-  const boxHeightPercent = Math.min(zoneHeightPercent * 0.94, Math.max(zoneHeightPercent * 0.2, zoneHeightPercent * baseBox.height * scaleFactorY));
-  const printImageRotate = props.printAngle ?? 0;
-
-  const baseBox2 = textPrint2 ? BOX_BASE_RATIOS.text : BOX_BASE_RATIOS.image;
-  const box2WidthPercent = Math.min(zoneWidthPercent * 0.94, Math.max(zoneWidthPercent * 0.2, zoneWidthPercent * baseBox2.width * scale2FactorX));
-  const box2HeightPercent = Math.min(zoneHeightPercent * 0.94, Math.max(zoneHeightPercent * 0.2, zoneHeightPercent * baseBox2.height * scale2FactorY));
-  const print2ImageRotate = props.print2Angle ?? 0;
 
   const swipeProgress = previewRef.current
     ? Math.min(Math.abs(swipeOffset) / (previewRef.current.getBoundingClientRect().width * SWIPE_THRESHOLD_RATIO), 1)
     : 0;
 
+  // Print content renderers
+  function renderPrintContent(
+    imageUrl: string | null | undefined,
+    isText: boolean,
+    angle: number,
+    text: string | undefined,
+    font: string | undefined,
+    placeholderName: string | undefined,
+    fontSizeFactor: number,
+  ) {
+    return (
+      <div style={{
+        position: "absolute", inset: 0, padding: 12,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        gap: imageUrl && isText ? 10 : 0,
+        overflow: "hidden",
+        pointerEvents: "none",
+      }}>
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={placeholderName || "Принт"}
+            style={{
+              maxWidth: "100%", maxHeight: isText ? "58%" : "100%",
+              objectFit: "contain",
+              transform: `rotate(${angle}deg)`,
+              transformOrigin: "center center",
+              pointerEvents: "none", userSelect: "none",
+            }}
+          />
+        ) : null}
+        {isText ? (
+          <Text strong style={{
+            color: "#111827", fontFamily: font || "Arial",
+            fontSize: Math.round(20 * fontSizeFactor),
+            lineHeight: 1.05,
+            textAlign: "center", wordBreak: "break-all",
+            pointerEvents: "none", userSelect: "none",
+            padding: 4, maxWidth: "100%",
+          }}>
+            {text || "Текст принта"}
+          </Text>
+        ) : !imageUrl ? (
+          <Text style={{
+            color: "#6b7280",
+            fontSize: Math.round(12 * fontSizeFactor),
+            textAlign: "center", wordBreak: "break-all",
+            pointerEvents: "none", userSelect: "none", padding: 4,
+          }}>
+            {placeholderName || "Принт"}
+          </Text>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <Card size="small" title="Превью изделия" style={{ height: "100%" }}>
       <Space direction="vertical" size={14} style={{ width: "100%" }}>
-        <div
-          style={{
-            borderRadius: 24,
-            padding: 16,
-            background: "linear-gradient(180deg, #f8fbff 0%, #eef3f9 100%)",
-            border: "1px solid #d9e2ec",
-          }}
-        >
+        <div style={{
+          borderRadius: 24, padding: 16,
+          background: "linear-gradient(180deg, #f8fbff 0%, #eef3f9 100%)",
+          border: "1px solid #d9e2ec",
+        }}>
+          {/* Outer drag container (swipe) */}
           <div
             ref={previewRef}
             style={{
-              position: "relative",
-              minHeight: 520,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              userSelect: interactionMode ? "none" : undefined,
-              touchAction: "none",
-              cursor: props.onSideChange && !interactionMode ? "grab" : undefined,
+              position: "relative", minHeight: 520,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              overflow: "hidden", touchAction: "none",
+              cursor: props.onSideChange ? "grab" : undefined,
             }}
             onPointerDown={handleSwipeStart}
-            onPointerMove={handlePointerMove}
-            onPointerUp={endInteraction}
-            onPointerCancel={endInteraction}
-            onPointerLeave={endInteraction}
+            onPointerMove={handleSwipeMove}
+            onPointerUp={handleSwipeEnd}
+            onPointerCancel={handleSwipeEnd}
+            onPointerLeave={handleSwipeEnd}
           >
-            <div
-              style={{
-                position: "relative",
-                width: "100%",
-                maxWidth: 440,
-                aspectRatio: "3 / 4",
-                borderRadius: 28,
-                background: "rgba(255, 255, 255, 0.94)",
-                border: "2px dashed #cbd5e1",
-                boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.5)",
-                transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.015}deg)`,
-                transition: swipeAnimating ? "transform 0.22s ease" : undefined,
-                opacity: 1 - swipeProgress * 0.12,
-              }}
-              onTransitionEnd={() => setSwipeAnimating(false)}
-            >
+            {/* Garment card */}
+            <div style={{
+              position: "relative", width: "100%", maxWidth: 440,
+              aspectRatio: "3 / 4", borderRadius: 28,
+              background: "rgba(255, 255, 255, 0.94)",
+              border: "2px dashed #cbd5e1",
+              boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.5)",
+              transform: `translateX(${swipeOffset}px) rotate(${swipeOffset * 0.015}deg)`,
+              transition: swipeAnimating ? "transform 0.22s ease" : undefined,
+              opacity: 1 - swipeProgress * 0.12,
+            }} onTransitionEnd={() => setSwipeAnimating(false)}>
+
+              {/* Model image */}
               {modelImageUrl ? (
-                <img
-                  src={modelImageUrl}
-                  alt={props.model?.name || "Модель"}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
-                    zIndex: 1,
-                    pointerEvents: "none",
-                  }}
-                />
+                <img src={modelImageUrl} alt={props.model?.name || "Модель"} style={{
+                  position: "absolute", inset: 0, width: "100%", height: "100%",
+                  objectFit: "contain", zIndex: 1, pointerEvents: "none",
+                }} />
               ) : null}
 
-              <div
-                style={{
-                  position: "absolute",
-                  inset: `${PRINT_ZONE_INSETS.top * 100}% ${PRINT_ZONE_INSETS.right * 100}% ${PRINT_ZONE_INSETS.bottom * 100}% ${PRINT_ZONE_INSETS.left * 100}%`,
-                  borderRadius: 24,
-                  background: "rgba(255, 255, 255, 0.08)",
-                  border: "1px solid rgba(59, 130, 246, 0.28)",
-                  zIndex: 2,
-                  pointerEvents: "none",
-                }}
-              />
+              {/*
+                Print zone container.
+                ─ position: absolute with inset% puts it in the correct area.
+                ─ It's a CSS containing block (position:absolute) so DraggableFrame
+                  children are positioned relative to it.
+                ─ pointer-events: none on the zone itself, but children (DraggableFrames)
+                  have their own event handlers — CSS allows this.
+                ─ overflow: visible so rotation handles can extend above/below the zone.
+              */}
+              <div style={{
+                position: "absolute",
+                inset: `${PRINT_ZONE_INSETS.top * 100}% ${PRINT_ZONE_INSETS.right * 100}% ${PRINT_ZONE_INSETS.bottom * 100}% ${PRINT_ZONE_INSETS.left * 100}%`,
+                borderRadius: 24,
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(59,130,246,0.28)",
+                zIndex: 2,
+                overflow: "hidden",
+              }}>
 
-              {showPrintLayer ? (
-                <div
-                  onPointerDown={handleInteractionStart("move")}
-                  style={{
-                    position: "absolute",
-                    left: `${props.printX ?? 50}%`,
-                    top: `${props.printY ?? 27}%`,
-                    transform: "translate(-50%, -50%)",
-                    width: `${boxWidthPercent}%`,
-                    height: `${boxHeightPercent}%`,
-                    borderRadius: 22,
-                    border: `2px dashed rgba(22, 119, 255, ${interactionMode ? 0.95 : 0.55})`,
-                    background: "rgba(255, 255, 255, 0.12)",
-                    boxShadow: interactionMode ? "0 0 0 2px rgba(59, 130, 246, 0.15)" : undefined,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    textAlign: "center",
-                    zIndex: 3,
-                    cursor: props.editable ? "move" : "default",
-                    touchAction: "none",
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      padding: 12,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: printImageUrl && textPrint ? 10 : 0,
+                {/* Print 1 */}
+                {showPrintLayer && (
+                  <DraggableFrame
+                    frame={frame1}
+                    angle={props.printAngle ?? 0}
+                    editable={props.editable}
+                    color="#1677ff"
+                    onChange={(f) => {
+                      const p = frameToProps(f, base1);
+                      props.onUpdatePrint?.({
+                        printX: p.printX, printY: p.printY,
+                        printScaleX: p.printScaleX, printScaleY: p.printScaleY,
+                      });
                     }}
+                    onRotate={(a) => props.onUpdatePrint?.({ printAngle: a })}
                   >
-                    {printImageUrl ? (
-                      <img
-                        src={printImageUrl}
-                        alt={props.print?.name || "Принт"}
-                        style={{
-                          maxWidth: "100%",
-                          maxHeight: textPrint ? "58%" : "100%",
-                          objectFit: "contain",
-                          transform: `rotate(${printImageRotate}deg)`,
-                          transformOrigin: "center center",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                        }}
-                      />
-                    ) : null}
-                    {textPrint ? (
-                      <Text
-                        strong
-                        style={{
-                          color: "#111827",
-                          fontFamily: props.printFont || "Arial",
-                          fontSize: Math.round((textPrint ? 20 : 18) * scaleFactor),
-                          lineHeight: 1.05,
-                          transform: `rotate(${printImageRotate}deg)`,
-                          transformOrigin: "center center",
-                          textAlign: "center",
-                          wordBreak: "break-word",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                          padding: 4,
-                          maxWidth: "100%",
-                        }}
-                      >
-                        {props.printText || "Текст принта"}
-                      </Text>
-                    ) : !printImageUrl ? (
-                      <Text
-                        style={{
-                          color: "#6b7280",
-                          fontSize: Math.round(12 * scaleFactor),
-                          textAlign: "center",
-                          wordBreak: "break-word",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                          padding: 4,
-                        }}
-                      >
-                        {props.print?.name || "Принт"}
-                      </Text>
-                    ) : null}
-                  </div>
+                    {renderPrintContent(
+                      printImageUrl, textPrint, 0,
+                      props.printText, props.printFont,
+                      props.print?.name, scaleFactor,
+                    )}
+                  </DraggableFrame>
+                )}
 
-                  {props.editable ? (
-                    <div
-                      onPointerDown={handleInteractionStart("rotate")}
-                      title="Поворот"
-                      style={{
-                        position: "absolute",
-                        top: -32,
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
-                        background: "#0f172a",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 16,
-                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.28)",
-                        cursor: "grab",
-                        userSelect: "none",
-                        touchAction: "none",
-                      }}
-                    >
-                      ↻
-                    </div>
-                  ) : null}
-
-                  {props.editable ? (
-                    <div
-                      onPointerDown={handleInteractionStart("resize")}
-                      title="Изменить размер"
-                      style={{
-                        position: "absolute",
-                        right: -12,
-                        bottom: -12,
-                        width: 26,
-                        height: 26,
-                        borderRadius: 999,
-                        background: "#fff",
-                        color: "#0f172a",
-                        border: "2px solid #1677ff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 15,
-                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.18)",
-                        cursor: "nwse-resize",
-                        userSelect: "none",
-                        touchAction: "none",
-                      }}
-                    >
-                      ⤡
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {showPrint2Layer ? (
-                <div
-                  onPointerDown={handleInteractionStart("move", 2)}
-                  style={{
-                    position: "absolute",
-                    left: `${props.print2X ?? 50}%`,
-                    top: `${props.print2Y ?? 27}%`,
-                    transform: "translate(-50%, -50%)",
-                    width: `${box2WidthPercent}%`,
-                    height: `${box2HeightPercent}%`,
-                    borderRadius: 22,
-                    border: `2px dashed rgba(234, 88, 12, ${interactionMode ? 0.95 : 0.55})`,
-                    background: "rgba(255, 255, 255, 0.12)",
-                    boxShadow: interactionMode ? "0 0 0 2px rgba(234, 88, 12, 0.15)" : undefined,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    textAlign: "center",
-                    zIndex: 4,
-                    cursor: props.editable ? "move" : "default",
-                    touchAction: "none",
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      padding: 12,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: print2ImageUrl && textPrint2 ? 10 : 0,
+                {/* Print 2 */}
+                {showPrint2Layer && (
+                  <DraggableFrame
+                    frame={frame2}
+                    angle={props.print2Angle ?? 0}
+                    editable={props.editable}
+                    color="#ea580c"
+                    onChange={(f) => {
+                      const p = frameToProps(f, base2);
+                      props.onUpdatePrint2?.({
+                        print2X: p.printX, print2Y: p.printY,
+                        print2ScaleX: p.printScaleX, print2ScaleY: p.printScaleY,
+                      });
                     }}
+                    onRotate={(a) => props.onUpdatePrint2?.({ print2Angle: a })}
                   >
-                    {print2ImageUrl ? (
-                      <img
-                        src={print2ImageUrl}
-                        alt={props.print2?.name || "Принт 2"}
-                        style={{
-                          maxWidth: "100%",
-                          maxHeight: textPrint2 ? "58%" : "100%",
-                          objectFit: "contain",
-                          transform: `rotate(${print2ImageRotate}deg)`,
-                          transformOrigin: "center center",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                        }}
-                      />
-                    ) : null}
-                    {textPrint2 ? (
-                      <Text
-                        strong
-                        style={{
-                          color: "#111827",
-                          fontFamily: props.print2Font || "Arial",
-                          fontSize: Math.round(20 * scale2FactorX),
-                          lineHeight: 1.05,
-                          transform: `rotate(${print2ImageRotate}deg)`,
-                          transformOrigin: "center center",
-                          textAlign: "center",
-                          wordBreak: "break-word",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                          padding: 4,
-                          maxWidth: "100%",
-                        }}
-                      >
-                        {props.print2Text || "Текст принта 2"}
-                      </Text>
-                    ) : !print2ImageUrl ? (
-                      <Text
-                        style={{
-                          color: "#6b7280",
-                          fontSize: Math.round(12 * scale2FactorX),
-                          textAlign: "center",
-                          wordBreak: "break-word",
-                          pointerEvents: "none",
-                          userSelect: "none",
-                          padding: 4,
-                        }}
-                      >
-                        {props.print2?.name || "Принт 2"}
-                      </Text>
-                    ) : null}
-                  </div>
+                    {renderPrintContent(
+                      print2ImageUrl, textPrint2, 0,
+                      props.print2Text, props.print2Font,
+                      props.print2?.name, scale2Factor,
+                    )}
+                  </DraggableFrame>
+                )}
 
-                  {props.editable ? (
-                    <div
-                      onPointerDown={handleInteractionStart("rotate", 2)}
-                      title="Поворот принта 2"
-                      style={{
-                        position: "absolute",
-                        top: -32,
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
-                        background: "#ea580c",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 16,
-                        boxShadow: "0 8px 24px rgba(234, 88, 12, 0.28)",
-                        cursor: "grab",
-                        userSelect: "none",
-                        touchAction: "none",
-                      }}
-                    >
-                      ↻
-                    </div>
-                  ) : null}
-
-                  {props.editable ? (
-                    <div
-                      onPointerDown={handleInteractionStart("resize", 2)}
-                      title="Изменить размер принта 2"
-                      style={{
-                        position: "absolute",
-                        right: -12,
-                        bottom: -12,
-                        width: 26,
-                        height: 26,
-                        borderRadius: 999,
-                        background: "#fff",
-                        color: "#ea580c",
-                        border: "2px solid #ea580c",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 15,
-                        boxShadow: "0 8px 24px rgba(234, 88, 12, 0.18)",
-                        cursor: "nwse-resize",
-                        userSelect: "none",
-                        touchAction: "none",
-                      }}
-                    >
-                      ⤡
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              </div>
             </div>
 
+            {/* Swipe arrow hint */}
             {props.onSideChange && swipeOffset !== 0 ? (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  [swipeOffset > 0 ? "left" : "right"]: 8,
-                  fontSize: 28,
-                  opacity: swipeProgress,
-                  pointerEvents: "none",
-                  transition: swipeAnimating ? "opacity 0.22s ease" : undefined,
-                  userSelect: "none",
-                }}
-              >
+              <div style={{
+                position: "absolute", top: "50%", transform: "translateY(-50%)",
+                [swipeOffset > 0 ? "left" : "right"]: 8,
+                fontSize: 28, opacity: swipeProgress, pointerEvents: "none",
+                transition: swipeAnimating ? "opacity 0.22s ease" : undefined,
+                userSelect: "none",
+              }}>
                 {swipeOffset > 0 ? "←" : "→"}
               </div>
             ) : null}
@@ -684,10 +394,10 @@ export default function GarmentPreview(props: Props) {
         </div>
 
         <Space wrap>
-          <Tag color={props.color ? "blue" : "default"}>Цвет: {props.color?.name || "не выбран"}</Tag>
-          <Tag color={props.model ? "purple" : "default"}>Модель: {props.model?.name || "не выбрана"}</Tag>
-          <Tag color={props.size ? "green" : "default"}>Размер: {props.size?.code || "не выбран"}</Tag>
-          <Tag color={props.print ? "gold" : "default"}>Принт: {props.print?.name || "без принта"}</Tag>
+          <Tag color={props.color  ? "blue"    : "default"}>Цвет: {props.color?.name   || "не выбран"}</Tag>
+          <Tag color={props.model  ? "purple"  : "default"}>Модель: {props.model?.name || "не выбрана"}</Tag>
+          <Tag color={props.size   ? "green"   : "default"}>Размер: {props.size?.code  || "не выбран"}</Tag>
+          <Tag color={props.print  ? "gold"    : "default"}>Принт: {props.print?.name  || "без принта"}</Tag>
         </Space>
       </Space>
     </Card>

@@ -74,7 +74,7 @@ export default function OrderDetails() {
   }
 
   return (
-    <Card style={{ margin: 16 }} title={`Заказ #${data.id}`}>
+    <Card style={{ margin: 16 }} title={`Заказ #${data.order_number ?? data.id}`}>
       <Space style={{ marginBottom: 12 }}>
         <Button
           type={!showAllFields ? "primary" : "default"}

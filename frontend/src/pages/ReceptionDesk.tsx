@@ -30,6 +30,7 @@ const { Title, Text } = Typography;
 
 type OrderRow = {
   id: number;
+  order_number?: number | null;
   status: string;
   model_id?: number;
   size_id?: number;
@@ -130,6 +131,7 @@ export default function ReceptionDesk() {
       const resolvedColorId = record.color_id ?? model?.color_id;
       printOrderReceipt({
         orderId: record.id,
+        orderNumber: record.order_number,
         clientName: record.client?.name,
         clientPhone: record.client?.phone,
         modelName: model?.name,
@@ -249,7 +251,12 @@ export default function ReceptionDesk() {
     rejectCancelMutation.isPending;
 
   const columns = [
-    { title: "№", dataIndex: "id", key: "id", width: 80 },
+    {
+      title: "№",
+      key: "order_number",
+      width: 80,
+      render: (_: any, record: OrderRow) => record.order_number ?? record.id,
+    },
     {
       title: "Статус",
       dataIndex: "status",

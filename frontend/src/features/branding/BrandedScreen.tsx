@@ -8,6 +8,7 @@ type BrandedScreenProps = {
   children: React.ReactNode;
   backgroundKey?: "kiosk-bg" | "board-bg";
   showLogo?: boolean;
+  ignoreBackground?: boolean;
   idleSplash?: boolean;
   splashTitle?: string;
   splashSubtitle?: string;
@@ -21,6 +22,7 @@ export default function BrandedScreen({
   children,
   backgroundKey = "kiosk-bg",
   showLogo = true,
+  ignoreBackground = false,
   idleSplash = false,
   splashTitle = "Нажмите для работы",
   splashSubtitle = "Экран был переведен в режим заставки из-за бездействия",
@@ -89,7 +91,8 @@ export default function BrandedScreen({
     <div
       style={{
         minHeight: "100vh",
-        backgroundImage: backgroundUrl ? `url(${backgroundUrl})` : undefined,
+        backgroundColor: ignoreBackground ? "#fff" : undefined,
+        backgroundImage: ignoreBackground || !backgroundUrl ? undefined : `url(${backgroundUrl})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         position: "relative",
