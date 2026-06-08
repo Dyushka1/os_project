@@ -10,6 +10,7 @@ import {
   Modal,
   Row,
   Select,
+  Slider,
   Space,
   Steps,
   Tag,
@@ -151,6 +152,7 @@ export default function ClientHome() {
   const [confirmPayload, setConfirmPayload] = useState<CreateOrderPayload | null>(null);
   const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
   const [promoDescription, setPromoDescription] = useState<string | null>(null);
+  const [telegramOrderId, setTelegramOrderId] = useState<number | null>(null);
 
   const colorsQuery = useQuery({
     queryKey: ["client-catalog-colors"],
@@ -245,6 +247,8 @@ export default function ClientHome() {
   const hasQueryError = colorsQuery.isError || modelsQuery.isError || sizesQuery.isError || modelSizesQuery.isError || printsQuery.isError;
   const isLoadingCatalog = colorsQuery.isLoading || modelsQuery.isLoading || sizesQuery.isLoading || modelSizesQuery.isLoading || printsQuery.isLoading;
 
+  const TELEGRAM_BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined;
+
   const createOrderMutation = useMutation({
     mutationFn: (payload: CreateOrderPayload) => createOrder(payload),
     onSuccess: (order) => {
@@ -261,12 +265,20 @@ export default function ClientHome() {
         printImageUrl: selectedPrint?.image_url,
         printSide: confirmPayload?.print_side,
       });
-      resetFlow();
-      navigate("/client", { replace: true });
+      if (confirmPayload?.notify_method === "telegram" && TELEGRAM_BOT_USERNAME) {
+        setTelegramOrderId(order.id);
+      } else {
+        resetFlow();
+        navigate("/client", { replace: true });
+      }
     },
     onError: (error: any) => {
-      const detail = error?.response?.data?.detail || "Не удалось создать заказ";
-      message.error(String(detail));
+      const detail = error?.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        message.error(detail.map((e: any) => e?.msg || JSON.stringify(e)).join("; "));
+      } else {
+        message.error(detail || "Не удалось создать заказ");
+      }
     },
   });
 
@@ -301,6 +313,7 @@ export default function ClientHome() {
     setConfirmPayload(null);
     setPromoStatus("idle");
     setPromoDescription(null);
+    setTelegramOrderId(null);
   }
 
   useEffect(() => {
@@ -623,6 +636,18 @@ export default function ClientHome() {
                           options={PRINT_SIDES}
                         />
                         <Alert type="info" showIcon message="Тяните рамку по области принта" description="Нижний правый маркер меняет размер, верхний маркер крутит принт, сама рамка двигается мышкой." />
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Размер шрифта: {printScale}%</div>
+                          <Slider min={5} max={500} value={printScale} onChange={(v) => setPrintScale(v)} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Ширина: {printScaleX}%</div>
+                          <Slider min={5} max={500} value={printScaleX} onChange={(v) => setPrintScaleX(v)} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Высота: {printScaleY}%</div>
+                          <Slider min={5} max={500} value={printScaleY} onChange={(v) => setPrintScaleY(v)} />
+                        </div>
                         <Button onClick={() => { setPrintX(50); setPrintY(50); setPrintAngle(0); setPrintScale(100); setPrintScaleX(100); setPrintScaleY(100); }}>
                           Сбросить размещение
                         </Button>
@@ -668,6 +693,18 @@ export default function ClientHome() {
                           options={PRINT_SIDES}
                         />
                         <Alert type="info" showIcon message="Тяните оранжевую рамку принта 2" description="Оранжевая рамка — принт 2. Нижний правый маркер меняет размер, верхний крутит." />
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Размер шрифта: {print2Scale}%</div>
+                          <Slider min={5} max={500} value={print2Scale} onChange={(v) => setPrint2Scale(v)} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Ширина: {print2ScaleX}%</div>
+                          <Slider min={5} max={500} value={print2ScaleX} onChange={(v) => setPrint2ScaleX(v)} />
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: 2, fontSize: 13, color: "#555" }}>Высота: {print2ScaleY}%</div>
+                          <Slider min={5} max={500} value={print2ScaleY} onChange={(v) => setPrint2ScaleY(v)} />
+                        </div>
                         <Button onClick={() => { setPrint2X(50); setPrint2Y(50); setPrint2Angle(0); setPrint2Scale(100); setPrint2ScaleX(100); setPrint2ScaleY(100); }}>
                           Сбросить размещение
                         </Button>
@@ -698,7 +735,7 @@ export default function ClientHome() {
                       <Descriptions.Item label="Цвет">{selectedColor?.name || "—"}</Descriptions.Item>
                       <Descriptions.Item label="Модель">{selectedModel?.name || "—"}</Descriptions.Item>
                       <Descriptions.Item label="Размер">{selectedSize?.code || "—"}</Descriptions.Item>
-                      <Descriptions.Item label="Принт">
+                      <Descriptions.Item label="Принт 1">
                         <Space direction="vertical" size={8}>
                           <span>
                             {isTextPrint(selectedPrint) && printText
@@ -714,6 +751,24 @@ export default function ClientHome() {
                           ) : null}
                         </Space>
                       </Descriptions.Item>
+                      {selectedPrint2 && (
+                        <Descriptions.Item label="Принт 2">
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <span>
+                              {isTextPrint(selectedPrint2) && print2Text
+                                ? `${selectedPrint2.name} · "${print2Text}"`
+                                : selectedPrint2.name}
+                            </span>
+                            {resolveApiUrl(selectedPrint2.image_url) ? (
+                              <img
+                                src={resolveApiUrl(selectedPrint2.image_url) ?? undefined}
+                                alt={selectedPrint2.name}
+                                style={{ width: 120, height: 120, objectFit: "contain", border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff" }}
+                              />
+                            ) : null}
+                          </div>
+                        </Descriptions.Item>
+                      )}
                     </Descriptions>
                   </Card>
 
@@ -795,11 +850,8 @@ export default function ClientHome() {
                         >
                           <Select
                             options={[
-                              { value: "sms", label: "SMS" },
                               { value: "email", label: "Email" },
                               { value: "telegram", label: "Telegram" },
-                              { value: "whatsapp", label: "WhatsApp" },
-                              { value: "viber", label: "Viber" },
                               { value: "none", label: "Не уведомлять" },
                             ]}
                           />
@@ -812,23 +864,23 @@ export default function ClientHome() {
                         >
                           {({ getFieldValue }) => {
                             const notifyMethod = getFieldValue("notify_method");
+                            const isTelegram = notifyMethod === "telegram";
                             const contactRequired = !!notifyMethod && notifyMethod !== "none";
                             return (
                               <Form.Item
                                 name="notify_contact"
                                 label="Контакт для уведомления"
                                 rules={contactRequired ? [{ required: true, message: "Укажите контакт для выбранного способа" }] : undefined}
+                                help={isTelegram ? "Клиент введёт этот номер в боте чтобы получить уведомление" : undefined}
                               >
                                 <Input
                                   disabled={!notifyMethod || notifyMethod === "none"}
                                   placeholder={
-                                    notifyMethod === "sms" || notifyMethod === "whatsapp" || notifyMethod === "viber"
+                                    isTelegram
                                       ? "+79990001122"
-                                      : notifyMethod === "telegram"
-                                        ? "@username"
-                                        : notifyMethod === "email"
-                                          ? "email@example.com"
-                                          : "Выберите способ уведомления"
+                                      : notifyMethod === "email"
+                                        ? "email@example.com"
+                                        : "Выберите способ уведомления"
                                   }
                                 />
                               </Form.Item>
@@ -876,12 +928,13 @@ export default function ClientHome() {
                     <Descriptions.Item label="Цвет">{selectedColor?.name || "—"}</Descriptions.Item>
                     <Descriptions.Item label="Модель">{selectedModel?.name || "—"}</Descriptions.Item>
                     <Descriptions.Item label="Размер">{selectedSize?.code || "—"}</Descriptions.Item>
-                    <Descriptions.Item label="Принт">
+                    <Descriptions.Item label="Принт 1">
                       <Space direction="vertical" size={8}>
                         <span>
                           {isTextPrint(selectedPrint)
                             ? printText || "Без принта"
                             : selectedPrint?.name || "Без принта"}
+                          {confirmPayload.print_side ? ` (${confirmPayload.print_side === "front" ? "перед" : "спина"})` : ""}
                         </span>
                         {resolveApiUrl(selectedPrint?.image_url) ? (
                           <img
@@ -892,7 +945,29 @@ export default function ClientHome() {
                         ) : null}
                       </Space>
                     </Descriptions.Item>
-                    <Descriptions.Item label="Размер принта, %">{printScale}</Descriptions.Item>
+                    <Descriptions.Item label="Размер принта 1, %">{printScale}</Descriptions.Item>
+                    {(confirmPayload.print2_id || confirmPayload.print2_text) && selectedPrint2 && (
+                      <>
+                        <Descriptions.Item label="Принт 2">
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <span>
+                              {confirmPayload.print2_text
+                                ? confirmPayload.print2_text
+                                : selectedPrint2.name}
+                              {confirmPayload.print2_side ? ` (${confirmPayload.print2_side === "front" ? "перед" : "спина"})` : ""}
+                            </span>
+                            {resolveApiUrl(selectedPrint2.image_url) ? (
+                              <img
+                                src={resolveApiUrl(selectedPrint2.image_url) ?? undefined}
+                                alt={selectedPrint2.name}
+                                style={{ width: 120, height: 120, objectFit: "contain", border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff" }}
+                              />
+                            ) : null}
+                          </div>
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Размер принта 2, %">{print2Scale}</Descriptions.Item>
+                      </>
+                    )}
                     {confirmPayload.promo_code && (
                       <Descriptions.Item label="Промокод">{confirmPayload.promo_code}</Descriptions.Item>
                     )}
@@ -905,6 +980,32 @@ export default function ClientHome() {
           </Col>
         </Row>
       </Card>
+      <Modal
+        title={`Заказ #${telegramOrderId} оформлен`}
+        open={telegramOrderId !== null}
+        closable={false}
+        footer={[
+          <Button key="close" type="primary" onClick={() => { resetFlow(); navigate("/client", { replace: true }); }}>
+            Готово
+          </Button>,
+        ]}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "8px 0" }}>
+          {TELEGRAM_BOT_USERNAME && (
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`https://t.me/${TELEGRAM_BOT_USERNAME}`)}`}
+              alt="QR-код для Telegram"
+              style={{ width: 220, height: 220, borderRadius: 12, border: "1px solid #e5e7eb" }}
+            />
+          )}
+          <Text style={{ textAlign: "center", fontSize: 15 }}>
+            Покажите клиенту этот QR-код
+          </Text>
+          <Text type="secondary" style={{ textAlign: "center" }}>
+            Клиент сканирует код → открывает бота → вводит номер телефона → получает уведомление когда заказ будет готов.
+          </Text>
+        </div>
+      </Modal>
     </BrandedScreen>
   );
 }

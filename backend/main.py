@@ -1,7 +1,15 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from pathlib import Path
+from services.telegram_polling import start_polling
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_polling()
+    yield
 from routers import (
     orders,
     login,
@@ -19,6 +27,7 @@ from routers import (
     catalog_model_sizes,
     branding,
     promo_codes,
+    telegram_webhook,
 )
 from database import Base, engine
 from models.orders import Order
@@ -31,7 +40,7 @@ from models.promo_codes import PromoCode
 from fastapi.middleware.cors import CORSMiddleware
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,6 +70,7 @@ app.include_router(catalog_prints.router)
 app.include_router(catalog_model_sizes.router)
 app.include_router(branding.router)
 app.include_router(promo_codes.router)
+app.include_router(telegram_webhook.router)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

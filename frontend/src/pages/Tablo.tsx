@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Col, List, Row, Tag, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import BrandedScreen from "../features/branding/BrandedScreen";
+import { resolveBrandingFileUrl, useBranding } from "../features/branding/useBranding";
 import { fetchBoardStatus } from "../features/orders/ordersApi";
 
 const { Title, Text } = Typography;
@@ -36,6 +37,9 @@ type BoardOrder = {
 };
 
 export default function Tablo() {
+  const branding = useBranding();
+  const logoUrl = resolveBrandingFileUrl(branding.getAsset("logo")?.file_url);
+
   const { data = [], isLoading } = useQuery({
     queryKey: ["tablo-orders"],
     queryFn: fetchBoardStatus,
@@ -57,8 +61,15 @@ export default function Tablo() {
   }, [data]);
 
   return (
-    <BrandedScreen backgroundKey="board-bg" showLogo>
-      <Row style={{ padding: "24px 32px", minHeight: "calc(100vh - 80px)" }} gutter={32}>
+    <BrandedScreen backgroundKey="board-bg" showLogo={false} ignoreBackground>
+      {logoUrl && (
+        <img
+          src={logoUrl}
+          alt="Логотип"
+          style={{ position: "fixed", top: 16, right: 16, maxHeight: 48, objectFit: "contain", zIndex: 10 }}
+        />
+      )}
+      <Row style={{ padding: "24px 32px", minHeight: "100vh" }} gutter={32}>
         <Col span={14}>
           <Title level={3} style={{ marginBottom: 16 }}>
             В обработке

@@ -114,10 +114,8 @@ export default function CreateOrder() {
               allowClear
               style={{ width: 180 }}
               options={[
-                { label: "SMS", value: "sms" },
                 { label: "Email", value: "email" },
                 { label: "Telegram", value: "telegram" },
-                { label: "WhatsApp", value: "whatsapp" },
                 { label: "Не уведомлять", value: "none" },
               ]}
             />

@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
 import GarmentPreview from "../components/GarmentPreview.tsx";
 import SessionGuard from "../features/session/SessionGuard";
+import { resolveApiUrl } from "../utils/resolveApiUrl";
 
 const { Title, Text } = Typography;
 
@@ -12,6 +13,7 @@ const TEXT_PRINT_TYPES = new Set(["text", "custom_text", "own_text", "own-text"]
 type NanesenieMasterTaskRead = {
   id: number;
   order_id: number;
+  order_number?: number | null;
   model_name: string | null;
   size_code: string | null;
   color_name: string | null;
@@ -49,7 +51,7 @@ type NanesenieMasterTaskRead = {
 
 export default function MasterPrintTask() {
   const [task, setTask] = useState<NanesenieMasterTaskRead | null>(null);
-  const [previewSide, setPreviewSide] = useState<"front" | "back">("front");
+  const [activeSlot, setActiveSlot] = useState<1 | 2>(1);
 
   const taskQuery = useQuery({
     queryKey: ["master-print-task-current"],
@@ -63,9 +65,7 @@ export default function MasterPrintTask() {
   useEffect(() => {
     if (taskQuery.data) {
       setTask(taskQuery.data);
-      if (taskQuery.data.print_side === "front" || taskQuery.data.print_side === "back") {
-        setPreviewSide(taskQuery.data.print_side);
-      }
+      setActiveSlot(1);
     }
   }, [taskQuery.data]);
 
@@ -100,7 +100,7 @@ export default function MasterPrintTask() {
   const onMarkDone = () => {
     if (!task) return;
     Modal.confirm({
-      title: `Завершить задание #${task.order_id}?`,
+      title: `Завершить задание #${task.order_number ?? task.order_id}?`,
       content: "Принт изготовлен и готов к передаче на печать.",
       okText: "Готово",
       cancelText: "Отмена",
@@ -148,7 +148,7 @@ export default function MasterPrintTask() {
       <Card style={{ marginBottom: 16, borderColor: "#1890ff", borderWidth: 2 }}>
         <Descriptions column={1} bordered size="small">
           <Descriptions.Item label="Номер заказа">
-            <Text strong style={{ fontSize: 22, color: "#1890ff" }}>#{task.order_id}</Text>
+            <Text strong style={{ fontSize: 22, color: "#1890ff" }}>#{task.order_number ?? task.order_id}</Text>
           </Descriptions.Item>
           <Descriptions.Item label="Модель">{task.model_name || "—"}</Descriptions.Item>
           <Descriptions.Item label="Размер">{task.size_code || "—"}</Descriptions.Item>
@@ -156,165 +156,134 @@ export default function MasterPrintTask() {
         </Descriptions>
       </Card>
 
-      {/* Задание на принт */}
-      <Card title="Принт" style={{ marginBottom: 16, borderColor: "#52c41a", borderWidth: 2 }}>
-        <Descriptions column={1} bordered size="small">
-          {!isTextPrint && task.print_id && (
-            <Descriptions.Item label="Номер нанесения">
-              <Text strong style={{ fontSize: 20, color: "#52c41a" }}>#{task.print_id}</Text>
-            </Descriptions.Item>
-          )}
-          {task.print_name && (
-            <Descriptions.Item label="Название">
-              <Text strong>{task.print_name}</Text>
-            </Descriptions.Item>
-          )}
-          {(task.print_width != null || task.print_height != null) && (
-            <Descriptions.Item label="Размер нанесения">
-              <Text code style={{ fontSize: 16 }}>
-                {task.print_width ?? "?"} × {task.print_height ?? "?"} мм
-              </Text>
-            </Descriptions.Item>
-          )}
-          {isTextPrint && task.print_text && (
-            <Descriptions.Item label="Текст надписи">
-              <Text strong style={{ fontSize: 20 }}>{task.print_text}</Text>
-            </Descriptions.Item>
-          )}
-          {isTextPrint && task.print_font && (
-            <Descriptions.Item label="Шрифт">
-              <Text code style={{ fontSize: 16 }}>{task.print_font}</Text>
-            </Descriptions.Item>
-          )}
-          {task.print_side && (
-            <Descriptions.Item label="Сторона">
-              <Text strong>{task.print_side === "front" ? "Спереди" : task.print_side === "back" ? "Сзади" : task.print_side}</Text>
-            </Descriptions.Item>
-          )}
-          {task.print_scale != null && (
-            <Descriptions.Item label="Масштаб">
-              <Text code style={{ fontSize: 16 }}>{task.print_scale}%</Text>
-            </Descriptions.Item>
-          )}
-          {task.print_x != null && task.print_y != null && (
-            <Descriptions.Item label="Позиция">
-              <Text code style={{ fontSize: 16 }}>X: {task.print_x}, Y: {task.print_y}</Text>
-            </Descriptions.Item>
-          )}
-          {task.print_angle != null && task.print_angle !== 0 && (
-            <Descriptions.Item label="Угол">
-              <Text code style={{ fontSize: 16 }}>{task.print_angle}°</Text>
-            </Descriptions.Item>
-          )}
-        </Descriptions>
+      {/* Print info card — slot-based: slot 1 = print 1, slot 2 = print 2 */}
+      {(() => {
+        const hasPrint2 = !!(task.print2_name || task.print2_text);
+        const slot1Side: "front" | "back" = task.print_side === "back" ? "back" : "front";
+        const slot2Side: "front" | "back" = task.print2_side === "back" ? "back" : "front";
+        const garmentSide: "front" | "back" = activeSlot === 1 ? slot1Side : slot2Side;
 
-        <div style={{ marginTop: 16 }}>
-          <Space style={{ marginBottom: 8 }}>
-            <Button
-              type={previewSide === "front" ? "primary" : "default"}
-              size="small"
-              onClick={() => setPreviewSide("front")}
-            >
-              Спереди
-            </Button>
-            <Button
-              type={previewSide === "back" ? "primary" : "default"}
-              size="small"
-              onClick={() => setPreviewSide("back")}
-            >
-              Сзади
-            </Button>
-          </Space>
+        const activeIsText = activeSlot === 1 ? isTextPrint : isTextPrint2;
+        const activePrintId = activeSlot === 1 ? task.print_id : task.print2_id;
+        const activePrintName = activeSlot === 1 ? task.print_name : task.print2_name;
+        const activeWidth = activeSlot === 1 ? task.print_width : task.print2_width;
+        const activeHeight = activeSlot === 1 ? task.print_height : task.print2_height;
+        const activePrintText = activeSlot === 1 ? task.print_text : task.print2_text;
+        const activePrintFont = activeSlot === 1 ? task.print_font : task.print2_font;
+        const activeScale = activeSlot === 1 ? task.print_scale : task.print2_scale;
+        const activeX = activeSlot === 1 ? task.print_x : task.print2_x;
+        const activeY = activeSlot === 1 ? task.print_y : task.print2_y;
+        const activeAngle = activeSlot === 1 ? task.print_angle : task.print2_angle;
+        const activeImageUrl = activeSlot === 1 ? task.print_image_url : task.print2_image_url;
+        const borderColor = activeSlot === 2 && hasPrint2 ? "#fa8c16" : "#52c41a";
+        const idColor = activeSlot === 1 ? "#52c41a" : "#fa8c16";
 
-          <GarmentPreview
-            model={{
-              name: task.model_name ?? undefined,
-              front_image_url: task.front_image_url,
-              back_image_url: task.back_image_url,
-            }}
-            print={{
-              name: task.print_name ?? undefined,
-              print_type: task.print_type ?? undefined,
-              image_url: task.print_image_url,
-            }}
-            color={{ name: task.color_name ?? undefined }}
-            size={{ code: task.size_code ?? undefined }}
-            printText={task.print_text ?? undefined}
-            printFont={task.print_font ?? undefined}
-            previewSide={previewSide}
-            onSideChange={setPreviewSide}
-            printSide={task.print_side ?? undefined}
-            printX={task.print_x ?? undefined}
-            printY={task.print_y ?? undefined}
-            printAngle={task.print_angle ?? undefined}
-            printScale={task.print_scale ?? undefined}
-            print2={task.print2_id ? { name: task.print2_name ?? undefined, print_type: task.print2_type ?? undefined, image_url: task.print2_image_url } : undefined}
-            print2Text={task.print2_text ?? undefined}
-            print2Font={task.print2_font ?? undefined}
-            print2Side={task.print2_side ?? undefined}
-            print2X={task.print2_x ?? undefined}
-            print2Y={task.print2_y ?? undefined}
-            print2Angle={task.print2_angle ?? undefined}
-            print2Scale={task.print2_scale ?? undefined}
-            editable={false}
-          />
-        </div>
-      </Card>
+        return (
+          <Card title={`Принт ${hasPrint2 ? activeSlot : 1}`} style={{ marginBottom: 16, borderColor, borderWidth: 2 }}>
+            <div style={{ marginBottom: 16 }}>
+              <Descriptions column={1} bordered size="small">
+                {!activeIsText && activePrintId && (
+                  <Descriptions.Item label="Номер нанесения">
+                    <Text strong style={{ fontSize: 20, color: idColor }}>#{activePrintId}</Text>
+                  </Descriptions.Item>
+                )}
+                {activePrintName && (
+                  <Descriptions.Item label="Название"><Text strong>{activePrintName}</Text></Descriptions.Item>
+                )}
+                {(activeWidth != null || activeHeight != null) && (
+                  <Descriptions.Item label="Размер нанесения">
+                    <Text code style={{ fontSize: 16 }}>{activeWidth ?? "?"} × {activeHeight ?? "?"} мм</Text>
+                  </Descriptions.Item>
+                )}
+                {activeIsText && activePrintText && (
+                  <Descriptions.Item label="Текст надписи">
+                    <Text strong style={{ fontSize: 20 }}>{activePrintText}</Text>
+                  </Descriptions.Item>
+                )}
+                {activeIsText && activePrintFont && (
+                  <Descriptions.Item label="Шрифт"><Text code style={{ fontSize: 16 }}>{activePrintFont}</Text></Descriptions.Item>
+                )}
+                {activeScale != null && (
+                  <Descriptions.Item label="Масштаб"><Text code style={{ fontSize: 16 }}>{activeScale}%</Text></Descriptions.Item>
+                )}
+                {activeX != null && activeY != null && (
+                  <Descriptions.Item label="Позиция">
+                    <Text code style={{ fontSize: 16 }}>X: {activeX}, Y: {activeY}</Text>
+                  </Descriptions.Item>
+                )}
+                {activeAngle != null && activeAngle !== 0 && (
+                  <Descriptions.Item label="Угол"><Text code style={{ fontSize: 16 }}>{activeAngle}°</Text></Descriptions.Item>
+                )}
+              </Descriptions>
+            </div>
 
-      {/* Принт 2 */}
-      {task.print2_id || task.print2_text ? (
-        <Card title="Принт 2" style={{ marginBottom: 16, borderColor: "#fa8c16", borderWidth: 2 }}>
-          <Descriptions column={1} bordered size="small">
-            {!isTextPrint2 && task.print2_id && (
-              <Descriptions.Item label="Номер нанесения">
-                <Text strong style={{ fontSize: 20, color: "#fa8c16" }}>#{task.print2_id}</Text>
-              </Descriptions.Item>
+            {hasPrint2 && (
+              <Space style={{ marginBottom: 8 }}>
+                <Button type={activeSlot === 1 ? "primary" : "default"} size="small" onClick={() => setActiveSlot(1)}>Принт 1</Button>
+                <Button type={activeSlot === 2 ? "primary" : "default"} size="small" onClick={() => setActiveSlot(2)}>Принт 2</Button>
+              </Space>
             )}
-            {task.print2_name && (
-              <Descriptions.Item label="Название">
-                <Text strong>{task.print2_name}</Text>
-              </Descriptions.Item>
-            )}
-            {(task.print2_width != null || task.print2_height != null) && (
-              <Descriptions.Item label="Размер нанесения">
-                <Text code style={{ fontSize: 16 }}>
-                  {task.print2_width ?? "?"} × {task.print2_height ?? "?"} мм
-                </Text>
-              </Descriptions.Item>
-            )}
-            {isTextPrint2 && task.print2_text && (
-              <Descriptions.Item label="Текст надписи">
-                <Text strong style={{ fontSize: 20 }}>{task.print2_text}</Text>
-              </Descriptions.Item>
-            )}
-            {isTextPrint2 && task.print2_font && (
-              <Descriptions.Item label="Шрифт">
-                <Text code style={{ fontSize: 16 }}>{task.print2_font}</Text>
-              </Descriptions.Item>
-            )}
-            {task.print2_side && (
-              <Descriptions.Item label="Сторона">
-                <Text strong>{task.print2_side === "front" ? "Спереди" : task.print2_side === "back" ? "Сзади" : task.print2_side}</Text>
-              </Descriptions.Item>
-            )}
-            {task.print2_scale != null && (
-              <Descriptions.Item label="Масштаб">
-                <Text code style={{ fontSize: 16 }}>{task.print2_scale}%</Text>
-              </Descriptions.Item>
-            )}
-            {task.print2_x != null && task.print2_y != null && (
-              <Descriptions.Item label="Позиция">
-                <Text code style={{ fontSize: 16 }}>X: {task.print2_x}, Y: {task.print2_y}</Text>
-              </Descriptions.Item>
-            )}
-            {task.print2_angle != null && task.print2_angle !== 0 && (
-              <Descriptions.Item label="Угол">
-                <Text code style={{ fontSize: 16 }}>{task.print2_angle}°</Text>
-              </Descriptions.Item>
-            )}
-          </Descriptions>
-        </Card>
-      ) : null}
+
+            <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+              <GarmentPreview
+                model={{ name: task.model_name ?? undefined, front_image_url: task.front_image_url, back_image_url: task.back_image_url }}
+                print={{ name: task.print_name ?? undefined, print_type: task.print_type ?? undefined, image_url: task.print_image_url }}
+                color={{ name: task.color_name ?? undefined }}
+                size={{ code: task.size_code ?? undefined }}
+                printText={task.print_text ?? undefined}
+                printFont={task.print_font ?? undefined}
+                previewSide={garmentSide}
+                printSide={task.print_side ?? undefined}
+                printX={task.print_x ?? undefined}
+                printY={task.print_y ?? undefined}
+                printAngle={task.print_angle ?? undefined}
+                printScale={task.print_scale ?? undefined}
+                print2={task.print2_id ? { name: task.print2_name ?? undefined, print_type: task.print2_type ?? undefined, image_url: task.print2_image_url } : undefined}
+                print2Text={task.print2_text ?? undefined}
+                print2Font={task.print2_font ?? undefined}
+                print2Side={task.print2_side ?? undefined}
+                print2X={task.print2_x ?? undefined}
+                print2Y={task.print2_y ?? undefined}
+                print2Angle={task.print2_angle ?? undefined}
+                print2Scale={task.print2_scale ?? undefined}
+                editable={false}
+              />
+              {(activeImageUrl || (activeIsText && activePrintText)) && (
+                <div style={{ textAlign: "center", flexShrink: 0 }}>
+                  <Text type="secondary" style={{ display: "block", marginBottom: 4, fontSize: 12 }}>Принт {activeSlot}</Text>
+                  {activeImageUrl ? (
+                    <img
+                      src={resolveApiUrl(activeImageUrl) ?? undefined}
+                      alt={`Принт ${activeSlot}`}
+                      style={{ maxWidth: 180, maxHeight: 240, objectFit: "contain", border: "1px solid #d9d9d9", borderRadius: 8, background: "#fafafa", padding: 8 }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: 180,
+                      minHeight: 120,
+                      border: "1px solid #d9d9d9",
+                      borderRadius: 8,
+                      background: "#fafafa",
+                      padding: 16,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: activePrintFont || "inherit",
+                      fontSize: 22,
+                      fontWeight: "bold",
+                      wordBreak: "break-word",
+                      textAlign: "center",
+                      lineHeight: 1.3,
+                    }}>
+                      {activePrintText}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Кнопки */}
       <Space direction="vertical" style={{ width: "100%" }} size={12}>

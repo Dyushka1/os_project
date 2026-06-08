@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Depends, Query
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from auth import get_current_user, get_current_user_optional, require_active_session, require_roles
@@ -19,7 +19,9 @@ from models.promo_codes import PromoCode
 from models.catalog_colors import CatalogColors
 from models.sessions import SessionModel
 from datetime import datetime, timezone
-from models.order_events import OrderEvent 
+from models.order_events import OrderEvent
+from services.notifications import notify_order_ready
+from services.telegram_polling import _normalize_phone, _phones_match
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 TEXT_PRINT_TYPES = {"text", "custom_text", "own_text", "own-text"}
@@ -88,7 +90,7 @@ def _build_print_master_task(order: Order, db: Session) -> PrintMasterTaskRead:
         print_font=order.print_font,
         print2_id=order.print2_id,
         print2_name=_resolve_print_name(db, order.print2_id),
-        print2_type=_resolve_print_type(db, order.print2_id),
+        print2_type=_resolve_print_type(db, order.print2_id) or ("custom_text" if order.print2_text else None),
         print2_image_url=_resolve_print_image_url(db, order.print2_id),
         print2_text=order.print2_text,
         print2_font=order.print2_font,
@@ -198,7 +200,7 @@ def _build_nanesenie_master_task(order: Order, db: Session) -> NanesenieMasterTa
         print_height=print_height,
         print2_id=order.print2_id,
         print2_name=_resolve_print_name(db, order.print2_id),
-        print2_type=_resolve_print_type(db, order.print2_id),
+        print2_type=_resolve_print_type(db, order.print2_id) or ("custom_text" if order.print2_text else None),
         print2_image_url=_resolve_print_image_url(db, order.print2_id),
         print2_text=order.print2_text,
         print2_font=order.print2_font,
@@ -368,10 +370,10 @@ def validate_print_payload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="print_side must be one of: front, back",
         )
-    if print_scale is not None and (print_scale < 20 or print_scale > 250):
+    if print_scale is not None and (print_scale < 5 or print_scale > 600):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="print_scale must be between 20 and 250",
+            detail="print_scale must be between 5 and 600",
         )
     if bool(print_text) != bool(print_font):
         raise HTTPException(
@@ -713,6 +715,16 @@ def create_order(order: OrderCreate,
                       print2_scale_x=order.print2_scale_x,
                       print2_scale_y=order.print2_scale_y,)
     model_and_size.stock_qty -= 1
+
+    # Auto-link telegram chat_id if this phone was already registered with the bot
+    if new_order.notify_method == "telegram" and new_order.notify_contact:
+        existing = db.query(Order).filter(
+            Order.notify_method == "telegram",
+            Order.telegram_chat_id.isnot(None),
+        ).first()
+        if existing and _phones_match(existing.notify_contact or "", new_order.notify_contact):
+            new_order.telegram_chat_id = existing.telegram_chat_id
+
     db.add(new_order)
     db.flush()
     log_order_event(db, new_order.id, "order_created", user_id=(current_user.id if current_user is not None else None))
@@ -1017,12 +1029,13 @@ def take_print(
 @router.post("/{order_id}/start_delivery", response_model=OrderRead)
 def start_delivery(
     order_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     session = Depends(require_active_session),
     ):
     require_roles(current_user, [Role.ADMIN, Role.ISSUE])
-    
+
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(
@@ -1035,11 +1048,21 @@ def start_delivery(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Заказ должен быть напечатан или завершён на нанесении перед выдачей",
         )
-    
+
     order.status = OrderStatus.DELIVERING.value
     log_order_event(db, order.id, "delivery_started", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
+
+    background_tasks.add_task(
+        notify_order_ready,
+        order.id,
+        order.notify_method,
+        order.notify_contact,
+        order.telegram_chat_id,
+        get_session_order_number(db, order),
+    )
+
     return serialize_order(order, db)
 
 @router.post("/{order_id}/issue", response_model=OrderRead)
@@ -1072,6 +1095,7 @@ def issue_order(
     order.time_issued = datetime.now(timezone.utc)
     commit_with_rollback(db)
     db.refresh(order)
+
     return serialize_order(order, db)
 
 
@@ -1226,7 +1250,8 @@ def release_nanesenie_order(
         )
 
     order.nanesenie_master_id = None
-    order.status = OrderStatus.PRINTED.value
+    order.status = OrderStatus.CONFIRMED.value
+    log_order_event(db, order.id, "nanesenie_released", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)
     return serialize_order(order, db)
@@ -1537,7 +1562,8 @@ def release_printing_task(
         )
 
     order.print_master_id = None
-    order.status = OrderStatus.CONFIRMED.value
+    order_session = get_order_session(db, order)
+    order.status = OrderStatus.NANESENIE_DONE.value if order_session.has_nanesenie else OrderStatus.CONFIRMED.value
     log_order_event(db, order.id, "printing_released", user_id=current_user.id)
     commit_with_rollback(db)
     db.refresh(order)

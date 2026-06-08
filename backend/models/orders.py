@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Float
+from sqlalchemy import BigInteger, Column, Integer, String, ForeignKey, DateTime, Float
 from database import Base
 import enum
 from fastapi import HTTPException
@@ -114,5 +114,7 @@ class Order(Base):
     print2_scale = Column(Integer, nullable=True)
     print2_scale_x = Column(Integer, nullable=True)
     print2_scale_y = Column(Integer, nullable=True)
+
+    telegram_chat_id = Column(BigInteger, nullable=True)
 
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True, index=True)
